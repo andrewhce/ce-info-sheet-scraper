@@ -1,0 +1,17 @@
+{
+  "workbookPath": "G:/Downloads/Marketing _ School Information Sheet 2026-2027.xlsx",
+  "templateTab": "Master Template",
+  "listTab": "PSTP Schools",
+  "port": 4477,
+  "crawl": {
+    "userAgent": "SchoolInfoSheetBot/1.0 (polite research crawler; reads public school pages only)",
+    "delayMs": 1500,
+    "timeoutMs": 25000,
+    "parallelSites": 6,
+    "maxPagesPerSite": 40,
+    "maxPdfsPerSite": 4,
+    "maxHtmlBytes": 4000000,
+    "maxPdfBytes": 20000000,
+    "cacheDays": 7
+  }
+}

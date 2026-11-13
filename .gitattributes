@@ -1,0 +1,3 @@
+# The container's start script must keep Unix line endings, or it will not run on the hosting service.
+*.sh text eol=lf
+Dockerfile text eol=lf

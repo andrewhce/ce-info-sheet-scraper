@@ -1,0 +1,14 @@
+node_modules
+data
+deploy/site
+tests
+docs
+.git
+.gitignore
+*.log
+*.md
+Start Dashboard.cmd
+Check Setup.cmd
+.env
+dist
+tools

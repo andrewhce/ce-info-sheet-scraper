@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_blank">
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #202124; margin: 0; padding: 16px; }
+  h1 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 6px 0; line-height: 1.4; }
+  .muted { color: #5f6368; }
+  .box { background: #f1f3f4; border-radius: 6px; padding: 8px 10px; margin: 10px 0; }
+  .bad { color: #b3261e; }
+  .good { color: #137333; }
+  button { font: inherit; padding: 6px 14px; border-radius: 4px; border: 1px solid #dadce0; background: #fff; cursor: pointer; }
+  button.primary { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .bar { height: 8px; background: #e8eaed; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar i { display: block; height: 100%; width: 0; background: #1a73e8; }
+  #results { list-style: none; margin: 8px 0; padding: 0; max-height: 210px; overflow: auto; border: 1px solid #e8eaed; border-radius: 6px; }
+  #results li { padding: 4px 8px; border-bottom: 1px solid #f1f3f4; }
+  #results li:last-child { border-bottom: 0; }
+</style>
+</head>
+<body>
+<h1>Load school info into this sheet</h1>
+<p>Choose the file the dashboard made (its name starts with <b>school-info-export</b>). Blank cells are filled in yellow. A cell that already has text is never changed: it gets a note with what the website says, and turns orange.</p>
+<p><input type="file" id="file" accept=".json,application/json"></p>
+<div id="summary" class="box" hidden></div>
+<p>
+  <button id="go" class="primary" disabled>Load into this sheet</button>
+  <button id="stop" hidden>Stop after this school</button>
+  <button id="close" hidden>Close</button>
+</p>
+<div id="progress" hidden>
+  <div class="bar"><i id="bar"></i></div>
+  <p id="now"></p>
+</div>
+<ul id="results" hidden></ul>
+<p id="final" hidden></p>
+<p class="muted" id="hint">Each school takes a few seconds. Keep this window open until it says Done. Loading the same file again is safe: nothing already written is changed.</p>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var data = null, running = false, stopNow = false;
+  var tally = { done: 0, filled: 0, flagged: 0, created: 0, failed: 0, still: 0 };
+
+  function show(node, text, cls) { node.hidden = false; node.textContent = text; node.className = cls || ''; }
+
+  function reset() {
+    data = null;
+    $('go').disabled = true; $('go').textContent = 'Load into this sheet';
+    $('summary').hidden = true;
+    $('results').hidden = true; $('results').textContent = '';
+    $('progress').hidden = true; $('final').hidden = true; $('close').hidden = true;
+  }
+
+  $('file').onchange = function () {
+    reset();
+    var f = this.files && this.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onerror = function () { show($('summary'), 'That file could not be read.', 'box bad'); };
+    reader.onload = function () {
+      var j;
+      try { j = JSON.parse(String(reader.result)); } catch (e) {
+        show($('summary'), 'That is not a file made by the dashboard. Choose the .json file whose name starts with school-info-export.', 'box bad');
+        return;
+      }
+      if (!j || j.kind !== 'school-info-export' || !Array.isArray(j.schools)) {
+        show($('summary'), 'That is not a file made by the dashboard. Choose the .json file whose name starts with school-info-export.', 'box bad');
+        return;
+      }
+      if (j.format !== 1) { show($('summary'), 'This file is from a newer version of the dashboard than this script. Add the latest Code.gs to the sheet first.', 'box bad'); return; }
+      if (!j.schools.length) { show($('summary'), 'The file holds no schools.', 'box bad'); return; }
+      data = j;
+      var when = j.createdAt ? new Date(j.createdAt).toLocaleString() : 'an unknown time';
+      show($('summary'), j.schools.length + (j.schools.length === 1 ? ' school' : ' schools') + ' in this file, made ' + when + (j.createdBy ? ' by ' + j.createdBy : '') + '.', 'box');
+      $('go').disabled = false;
+    };
+    reader.readAsText(f);
+  };
+
+  function addLine(text, cls) {
+    var li = document.createElement('li');
+    li.textContent = text;
+    if (cls) li.className = cls;
+    $('results').hidden = false;
+    $('results').appendChild(li);
+    $('results').scrollTop = $('results').scrollHeight;
+  }
+
+  function finish(at) {
+    running = false;
+    $('stop').hidden = true; $('close').hidden = false; $('file').disabled = false;
+    var left = data.schools.length - at;
+    var parts = [tally.done + ' of ' + data.schools.length + ' schools loaded'];
+    parts.push(tally.filled + ' blank cells filled (yellow)');
+    parts.push(tally.flagged + ' cells with updated info to check (orange)');
+    if (tally.created) parts.push(tally.created + ' new tab' + (tally.created === 1 ? '' : 's') + ' made');
+    if (tally.failed) parts.push(tally.failed + ' failed (marked in red above)');
+    var head = left > 0 ? 'Stopped. ' : 'Done. ';
+    show($('final'), head + parts.join(', ') + '. Each school is listed in the Export Log tab.', tally.failed || left > 0 ? 'bad' : 'good');
+    $('bar').style.width = Math.round(((data.schools.length - left) / data.schools.length) * 100) + '%';
+    $('now').textContent = '';
+    if (tally.failed || left > 0) { $('go').disabled = false; $('go').textContent = 'Load the file again'; }   // safe: nothing already written is changed
+  }
+
+  function next(i) {
+    if (stopNow || i >= data.schools.length) { finish(i); return; }
+    if (tally.still >= 3) {
+      addLine('Stopped: three schools in a row failed, so something is wrong (for example Google asking you to allow the script again). Close this window, fix it, then load the same file again.', 'bad');
+      finish(i); return;
+    }
+    var entry = data.schools[i];
+    var name = entry && entry.school && entry.school.name ? entry.school.name : '(no name)';
+    $('now').textContent = 'Loading ' + (i + 1) + ' of ' + data.schools.length + ': ' + name;
+    $('bar').style.width = Math.round((i / data.schools.length) * 100) + '%';
+    google.script.run
+      .withSuccessHandler(function (r) {
+        tally.done++; tally.still = 0;
+        var s = r.summary || {};
+        tally.filled += s.filled || 0; tally.flagged += s.flagged || 0;
+        if (r.created) tally.created++;
+        addLine(r.name + ': ' + (s.filled || 0) + ' filled, ' + (s.flagged || 0) + ' to check' + (r.created ? ' (new tab made)' : '') + ' in tab "' + r.tab + '"');
+        next(i + 1);
+      })
+      .withFailureHandler(function (err) {
+        tally.failed++; tally.still++;
+        addLine(name + ': ' + ((err && err.message) || String(err)), 'bad');
+        next(i + 1);
+      })
+      .loadSchoolFromFile({ school: entry.school, fields: entry.fields, hints: data.hints || {} });
+  }
+
+  $('go').onclick = function () {
+    if (!data || running) return;
+    running = true; stopNow = false;
+    tally = { done: 0, filled: 0, flagged: 0, created: 0, failed: 0, still: 0 };
+    $('results').textContent = ''; $('final').hidden = true;
+    $('go').disabled = true; $('file').disabled = true;
+    $('stop').hidden = false; $('stop').disabled = false; $('close').hidden = true;
+    $('progress').hidden = false;
+    next(0);
+  };
+
+  $('stop').onclick = function () { stopNow = true; $('stop').disabled = true; };
+  $('close').onclick = function () { google.script.host.close(); };
+})();
+</script>
+</body>
+</html>

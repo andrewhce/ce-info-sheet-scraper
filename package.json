@@ -1,0 +1,25 @@
+{
+  "name": "school-info-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rules-only scraper that fills the School Information Sheet template from each school's own website, with a local dashboard.",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node src/setup-check.js",
+    "import": "node src/import-workbook.js",
+    "scrape": "node src/scrape.js",
+    "test": "node tests/xlsx-lean.test.js && node tests/results-package.test.js && node tests/auth.test.js && node tests/rules.test.js && node tests/agent.test.js && node tests/apps-script.test.js && node tests/publish-copy.test.js",
+    "build-copy": "node deploy/build-static.js",
+    "deploy-copy": "node deploy/deploy-copy.js",
+    "publish-copy": "node deploy/publish-copy.js",
+    "make-portable": "node tools/make-portable.js",
+    "build-sheet-script": "node tools/embed-dialog.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "cheerio": "^1.0.0",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "pdf-parse": "1.1.1"
+  }
+}

@@ -1,0 +1,8 @@
+# Never put these on GitHub: they hold your workbook, the scraped results and secrets.
+data/
+node_modules/
+deploy/site/
+*.log
+.env
+.env.*
+dist/
