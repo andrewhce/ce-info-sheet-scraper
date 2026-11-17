@@ -37,7 +37,7 @@ fs.writeFileSync(path.join(OUT, 'data', '.keep'), '');
 const copy = (rel, filter) => { const from = path.join(PATHS.root, rel); if (fs.existsSync(from)) fs.cpSync(from, path.join(OUT, rel), { recursive: true, filter }); };
 for (const f of ['Start Dashboard.cmd', 'Check Setup.cmd', 'package.json', 'package-lock.json', 'Dockerfile', 'docker-entrypoint.sh']) copy(f);
 for (const d of ['src', 'google-sheet', 'docs']) copy(d);
-copy('deploy', (from) => !from.includes(path.join('deploy', 'site')));
+copy('deploy', (from) => !from.includes(path.join('deploy', 'site')) && !/[\\/]\.env(?:\.|$)/i.test(from));
 console.log('Copying the libraries ...');
 copy('node_modules');
 
@@ -61,22 +61,27 @@ const readme = [
   'SCHOOL INFO SHEET: READ ME FIRST',
   '',
   '1. Unzip this folder anywhere, for example onto your Desktop. Do not run it from inside the zip file.',
-  '2. Open the folder and double-click "Start Dashboard.cmd". A black window opens, then your web browser.',
+  '2. Open the folder and double-click "Start Dashboard.cmd". Your web browser will open automatically.',
   '   - If Windows shows a blue "Windows protected your PC" box, click "More info", then "Run anyway".',
-  '   - Keep the black window open while you use the dashboard. Close it to stop.',
-  '3. On the "Start here" page, choose your School Information Sheet as an Excel file.',
-  '   In Google Sheets that is File, Download, Microsoft Excel (.xlsx).',
-  '4. Use "Run scraper" to read the school websites (Tier 1 takes about an hour; keep the computer on),',
-  '   and "Schools" to review what was found.',
+  '   - When you are finished, use "Turn off dashboard" at the bottom of any page.',
+  '   (If your browser does not open by itself, go to http://localhost:4477)',
+  '3. On the "Start here" page, Step 1: load your School Information Sheet as an Excel (.xlsx) file.',
+  '   In Google Sheets: File -> Download -> Microsoft Excel (.xlsx).',
+  '4. Step 2: press "Start checking websites", choose some schools, then press "Start checking".',
+  '   Keep the computer awake while it works. Or add a teammate\'s results file (.zip) to skip the wait.',
+  '5. Step 3: look at the answers on the "Schools" and "To check" pages, or download Excel (.xlsx) / CSV.',
+  '   Not sure what something means? Open the "Help" page at the top.',
   '',
-  'Nothing needs installing. Everything the program saves goes in the "data" folder here.',
+  'Nothing needs installing. Your sheet and results are saved in your Windows user AppData folder',
+  '(%LocalAppData%\\SchoolInfoSheet\\data), so replacing this folder with a newer update keeps all your work.',
   '',
-  'SHARING: on the Start here page, "Save my results to a file" makes one file you can send a teammate,',
-  'and "Add a teammate\'s results file" adds theirs, so the same schools are not read twice.',
+  'SHARING: on the Start here page, "Save results for teammates (.zip)" creates one file you can send',
+  'to coworkers so nobody has to check the same schools twice.',
   '',
-  withExport ? 'The Google Sheet export is already set up in this copy. Keep this folder private: it holds the export secret.' : 'The Google Sheet export is optional. Setup steps are in the docs folder (GOOGLE-SHEET-EXPORT.md).',
+  withExport ? 'The direct Google Sheet export is already set up in this copy. Keep this zip private.' : 'You can export to Excel (.xlsx) / CSV anytime with one click, or set up the optional Google Sheet menu inside Start here -> Advanced.',
   '',
-  'Trouble? Double-click "Check Setup.cmd" to see what is ready and what is not. More help is in the "docs" folder.',
+  'The full step-by-step guide is in the "docs" folder: INSTALL-STEP-BY-STEP.md',
+  'Trouble? Double-click "Check Setup.cmd" to see what is ready and what needs attention.',
   '',
 ].join('\r\n');
 fs.writeFileSync(path.join(OUT, 'READ ME FIRST.txt'), readme);

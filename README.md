@@ -8,25 +8,25 @@ assistant that only reads what the scraper saved and answers questions about it 
 
 ## Start in three steps
 
-1. Double-click **`Start Dashboard.cmd`**. The dashboard opens in your browser. Keep the black window open
-   while you use it; close it to stop. (The first time it installs what it needs, which takes a minute and needs internet. If
-   Node.js is missing it opens the download page: install the "LTS" version, then double-click again.)
-2. On **Start here**, choose your School Information Sheet as an Excel file. In Google Sheets: File, Download,
-   Microsoft Excel (.xlsx). Do this again whenever the sheet changes.
-3. On **Run scraper**, press **Tier 1** (about an hour for 65 schools; keep the PC awake). Then open **Schools** to review.
+1. Double-click **`Start Dashboard.cmd`**. The dashboard opens quietly in your browser (no black command window stays open; use **Turn off dashboard** at the bottom of the page when you are done, or run `Start Dashboard.cmd --console` to view live console output). The first time it installs dependencies automatically. If Node.js is missing it opens the download page: install the "LTS" version, then double-click again.
+2. On **Start here**, follow Step 1 to drop in your School Information Sheet as an Excel file (in Google Sheets: File → Download → Microsoft Excel (.xlsx)). Do this again whenever the sheet changes.
+3. On **Check websites**, choose **Tier 1**, then press **Start checking** (about an hour for 65 schools; keep the PC awake). Choosing a group only selects it: nothing starts until you press Start checking. Then open **Schools** to look at the answers, copy them, or download Excel (`.xlsx`) / CSV spreadsheets. New to the dashboard? Open **Help** (top right) for a plain-words guide to every label and colour.
 
 Something not working? Double-click **`Check Setup.cmd`**: it lists what is ready and what still needs doing, in plain words.
-The same list is at the top of the Start here page.
+The same list is shown on **Start here** if anything still needs attention.
 
 ## The pages
 
 | Page | What it is for |
 | --- | --- |
-| **Start here** | A checklist of what is ready, where you choose your sheet, and the optional Google Sheet export setup. |
-| **Schools** | Every school with its status. Click one to see each template row, your sheet beside the website, and the evidence. |
-| **Ask** | Ask questions about the school data in plain English; answers show their source. Needs an API key (Claude, or Groq to try it out). Reads only: anything that changes something is a button you press. |
-| **Run scraper** | Buttons to read Tier 1, 2, 3, the schools not read yet, or all. Live progress and a Stop button. |
-| **Script** | The code and the rules, grouped by what they do, readable in the browser. |
+| **Start here** | 3-step guide: load your sheet, scrape or load teammate results, and export Excel/CSV (plus Advanced Google Sheet menu setup). |
+| **Schools** | Every school with clickable quick-filter cards (including websites updated since the previous check). Click a school to copy answers with one click, view evidence, or export a spreadsheet. |
+| **To check** | The researcher's work list. Every main fact gets a rating out of 100 (**Safe to use**, **Quick look** or **Check this**) from where it came from and how clearly the website says it, never from your sheet. Only the answers the dashboard is unsure about are listed, least certain first, so nobody re-reads answers that are almost certainly right (see [docs/TRUST.md](docs/TRUST.md)). |
+| **Check websites** | Choose Tier 1, 2, 3, schools not checked yet, or all schools, then press **Start checking** (choosing alone never starts a run); set up an **automatic schedule**; and connect **Slack notifications**, which list every changed answer of every updated school in full (nothing is cut off), numbered when long, and warn when a school's website link looks like a different school. |
+| **Accuracy** | How often the answers are actually right: pick a list of schools, mark each answer **✓ Right** or **✗ Wrong** on the school page, and see the results per question (see [docs/ACCURACY.md](docs/ACCURACY.md)). |
+| **Help** | A plain-words guide: what the dashboard is for, a quick guide, and what every label, colour and status means. |
+| **Ask** | Optional AI assistant to ask questions about school data in plain English (only needed if connected with a Claude or Groq key). |
+| **Technical details & code** | Footer link at the bottom of any page showing the source code and extraction rules in plain view. |
 
 ## Where things are
 
@@ -56,9 +56,14 @@ precious except `results/` (what the scraper found). `data/cache/` only saves ti
 
 ## Guides
 
+- [docs/RAILWAY-STEP-BY-STEP.md](docs/RAILWAY-STEP-BY-STEP.md): click-by-click steps to test the dashboard online on Railway (GitHub, a volume, Google sign-in, the settings, and what to check). The longer reference is [docs/ONLINE-SETUP.md](docs/ONLINE-SETUP.md).
+- [docs/INSTALL-STEP-BY-STEP.md](docs/INSTALL-STEP-BY-STEP.md): plain-language, click-by-click steps for teammates to install and start using the dashboard on their own Windows computer (hand this to them with the zip).
 - [docs/TEAM-SETUP.md](docs/TEAM-SETUP.md): give the program to teammates as a folder they unzip and double-click (nothing to install, no server), and share results between computers.
 - [docs/ONLINE-SETUP.md](docs/ONLINE-SETUP.md): (needs a hosting service) put the program on a hosting service so the team opens a link, signs in with company Google accounts, and needs nothing installed.
 - [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md): what it does and does not do, how a school is read, commands, settings, troubleshooting.
+- [docs/TRUST.md](docs/TRUST.md): the trust score: what raises and lowers it, where the weights come from, and how the spot-checks tune it.
+- [docs/MONTE-CARLO-REPORT.md](docs/MONTE-CARLO-REPORT.md): a simulation, in plain words, of how many answers are likely wrong, how much checking is worth it, how many hand checks you need, and how much the ratings depend on judgement. Remake it with `node tools/monte-carlo.js`.
+- [docs/ACCURACY.md](docs/ACCURACY.md): how to measure how accurate the scraper is with spot-checks, and how to read the figures.
 - [docs/ASK.md](docs/ASK.md): the Ask page: connect an API key, what the assistant can and cannot do, cost and the monthly cap, what it records.
 - [docs/GOOGLE-SHEET-EXPORT.md](docs/GOOGLE-SHEET-EXPORT.md): send a school's findings into a copy of your Google Sheet for a person to fact check (download a file, load it from the sheet's School Info menu).
 - [docs/DEPLOY-GUIDE.md](docs/DEPLOY-GUIDE.md): a showcase script for your boss, and putting a read-only copy online (set aside for now).

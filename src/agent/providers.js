@@ -22,22 +22,62 @@ const oneLine = (s, n) => { s = String(s == null ? '' : s).replace(/\s+/g, ' ').
  */
 const webSearchTool = (model) => ({ type: /haiku/i.test(model) ? 'web_search_20250305' : 'web_search_20260209', name: 'web_search', max_uses: 3 });
 
+function normalizeSystemBlocks(system) {
+  if (system && typeof system === 'object' && !Array.isArray(system) && typeof system.staticText === 'string') {
+    const blocks = [{ type: 'text', text: system.staticText, cache_control: { type: 'ephemeral' } }];
+    if (system.memoryText) blocks.push({ type: 'text', text: system.memoryText });
+    return blocks;
+  }
+  return [{ type: 'text', text: String(system || ''), cache_control: { type: 'ephemeral' } }];
+}
+
+function flattenSystemText(system) {
+  if (system && typeof system === 'object' && !Array.isArray(system) && typeof system.staticText === 'string') {
+    return system.memoryText ? `${system.staticText}\n\n${system.memoryText}` : system.staticText;
+  }
+  return String(system || '');
+}
+
 /** client: an Anthropic SDK client (or anything with the same messages calls). webSearch: also offer the web search tool. */
 function anthropicProvider(client, { fallbacks = true, webSearch = false } = {}) {
   return {
     name: 'anthropic', compact: false, maxToolChars: 40000, maxContextTokens: 150000, webSearch,
-    async create({ model, system, tools, messages, effort, signal }) {
+    async create({ model, system, tools, messages, effort, signal, onText }) {
       const body = {
-        model, max_tokens: 16000, system: [{ type: 'text', text: system }], tools: webSearch ? [...tools, webSearchTool(model)] : tools, messages,
+        model, max_tokens: 4096, system: normalizeSystemBlocks(system), tools: webSearch ? [...tools, webSearchTool(model)] : tools, messages,
         output_config: { effort }, cache_control: { type: 'ephemeral' },
       };
+      const streamFn = fallbacks
+        ? (client.beta && client.beta.messages && typeof client.beta.messages.stream === 'function' ? (b) => client.beta.messages.stream(b, { signal }) : null)
+        : (client.messages && typeof client.messages.stream === 'function' ? (b) => client.messages.stream(b, { signal }) : null);
+      if (streamFn && typeof onText === 'function') {
+        const reqBody = fallbacks ? { ...body, betas: [BETA_FALLBACK], fallbacks: 'default' } : body;
+        const stream = streamFn(reqBody);
+        stream.on('text', (delta) => { try { onText(delta); } catch { /* ignore listener errors */ } });
+        return await stream.finalMessage();
+      }
       // if the safety filter declines a request, the API retries it on a substitute model inside the same call
       if (fallbacks) return client.beta.messages.create({ ...body, betas: [BETA_FALLBACK], fallbacks: 'default' }, { signal });
       return client.messages.create(body, { signal });
     },
     async test({ model, signal }) {
+      let available = null;
+      if (client.models && typeof client.models.list === 'function') {
+        try {
+          const page = await client.models.list({ limit: 30 }, { signal });
+          const data = (page && Array.isArray(page.data)) ? page.data : [];
+          const picked = data
+            .filter((m) => m && typeof m.id === 'string' && /^claude-/i.test(m.id))
+            .map((m) => ({ id: m.id, label: m.display_name || m.id }));
+          if (picked.length) available = picked;
+        } catch { /* fall back to single retrieve */ }
+      }
       const m = await client.models.retrieve(model, undefined, { signal });
-      return { message: `Connected. ${m && m.display_name ? m.display_name : model} is available.` };
+      const label = (m && m.display_name) || model;
+      return {
+        message: `Connected. ${label} is available.`,
+        ...(available ? { models: available, modelAvailable: available.some((x) => x.id === model) } : {}),
+      };
     },
   };
 }
@@ -46,7 +86,7 @@ function anthropicProvider(client, { fallbacks = true, webSearch = false } = {})
 
 /** Claude-format history -> OpenAI-format messages. Thinking blocks do not exist on this side and are dropped. */
 function toOpenAiMessages(system, messages) {
-  const out = [{ role: 'system', content: system }];
+  const out = [{ role: 'system', content: flattenSystemText(system) }];
   for (const m of messages) {
     if (m.role === 'user') {
       if (typeof m.content === 'string') { out.push({ role: 'user', content: m.content }); continue; }
@@ -124,12 +164,16 @@ function groqProvider({ apiKey, fetchImpl = fetch, baseUrl = GROQ_BASE, sleep = 
   }
   return {
     name: 'groq', compact: true, maxToolChars: 12000, maxContextTokens: 60000,
-    async create({ model, system, tools, messages, signal }) {
-      const json = await call('POST', '/chat/completions', {
+    async create({ model, system, tools = [], messages, signal }) {
+      const payload = {
         model, messages: toOpenAiMessages(system, messages),
-        tools: tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
-        tool_choice: 'auto', temperature: 0.2, max_completion_tokens: 2048,
-      }, signal);
+        temperature: 0.2, max_completion_tokens: 2048,
+      };
+      if (tools.length) {
+        payload.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
+        payload.tool_choice = 'auto';
+      }
+      const json = await call('POST', '/chat/completions', payload, signal);
       return fromOpenAi(json);
     },
     /** The chat models this key can use. */

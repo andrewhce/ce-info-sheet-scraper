@@ -6,8 +6,9 @@
 //
 // Usage:  node src/import-workbook.js ["path/to/workbook.xlsx"]
 const fs = require('fs');
+const path = require('path');
 const { loadWorkbookLean } = require('./lib/xlsx-lean');
-const { PATHS, loadConfig, resolveWorkbook, writeJson, slug, alnum, squash } = require('./lib/util');
+const { PATHS, loadConfig, resolveWorkbook, readJson, writeJson, slug, alnum, squash } = require('./lib/util');
 const { keyRows } = require('./lib/template');
 
 function cellText(cell) {
@@ -218,6 +219,36 @@ async function main() {
   }
 
   // ---- save existing tab values ----
+  const prevData = readJson(PATHS.schools, null);
+  const migrated = [];
+  if (prevData && Array.isArray(prevData.schools) && fs.existsSync(PATHS.resultsDir)) {
+    const prevById = new Map(prevData.schools.map((x) => [x.id, x]));
+    const newIds = new Set(schools.map((x) => x.id));
+    const normUrl = (u) => {
+      if (!u) return '';
+      try { const x = new URL(u); return x.hostname.replace(/^www\./i, '').toLowerCase() + x.pathname.replace(/\/+$/, '').toLowerCase(); } catch { return ''; }
+    };
+    const oldOrphans = prevData.schools.filter((oldS) => !newIds.has(oldS.id) && fs.existsSync(path.join(PATHS.resultsDir, oldS.id + '.json')));
+    for (const s of schools) {
+      const targetRes = path.join(PATHS.resultsDir, s.id + '.json');
+      if (prevById.has(s.id) || fs.existsSync(targetRes)) continue;
+      const sUrl = normUrl(s.website);
+      const sTabs = new Set(s.tabs.map((t) => strip(t)));
+      const match = oldOrphans.find((o) =>
+        (sUrl && normUrl(o.website) === sUrl) ||
+        (Array.isArray(o.tabs) && o.tabs.some((t) => sTabs.has(strip(t)))) ||
+        sameTokens(tokens(o.name), tokens(s.name))
+      );
+      if (!match) continue;
+      const oldFile = path.join(PATHS.resultsDir, match.id + '.json');
+      const prevRes = readJson(oldFile, null);
+      if (prevRes) {
+        writeJson(targetRes, { ...prevRes, id: s.id, name: s.name });
+        migrated.push(`${match.name} -> ${s.name}`);
+      }
+    }
+  }
+
   fs.rmSync(PATHS.sheetDir, { recursive: true, force: true });
   for (const s of schools) {
     const mine = tabs.filter((t) => t.school === s);
@@ -240,6 +271,7 @@ async function main() {
   console.log(`Template rows: ${rows.length} (${rows.filter((r) => r.kind === 'field').length} fields)`);
   console.log(`Schools in "${cfg.listTab}": ${schools.length}  | with website: ${schools.filter((s) => s.website).length}`);
   console.log(`Existing tabs matched: ${tabs.length - orphan.length} of ${tabs.length}`);
+  if (migrated.length) console.log('\nPreserved scrape results for renamed schools:\n' + migrated.map((m) => '  ' + m).join('\n'));
   if (soft.length) console.log('\nMatched by something other than the exact title:\n' + soft.map((t) => `  ${t.title} -> ${t.school.name}  (${t.how})`).join('\n'));
   if (noTab.length) console.log('\nSchools with no tab yet:\n' + noTab.map((s) => '  ' + s.name).join('\n'));
   if (orphan.length) console.log('\nTabs not in the list (ignored):\n' + orphan.map((t) => `  ${t.title}  [B1: ${t.b1}]`).join('\n'));

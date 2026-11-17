@@ -69,6 +69,59 @@ check('faculty degrees: another division\'s figure is not used, the right percen
   assert.strictEqual(n.value, 'More than 80%'); assert.strictEqual(n.num, 80);
 });
 
+// ------------------------------------------- weak fields fixed after the first trust-score review ---
+check('enrollment: a phone number, a graduating class and a label that belongs to another number are not headcounts (Woodside Priory, St. Mark\'s, Nueva, Mitty)', () => {
+  let f = facts(['Director of Enrollment Management and Access (650) 851-6158', 'Director of Enrollment Management 214-346-8202 CrouchA@smtexas.org']);
+  assert.strictEqual(f.enrollment.status, 'none', JSON.stringify(f.enrollment));
+  f = facts(['Class of 2026 enrollment 113']);
+  assert.strictEqual(f.enrollment.status, 'none', JSON.stringify(f.enrollment));
+  // "Total Exams: 2,564" is the number of AP exams; the students are the number that follows "Total Students:"
+  f = facts(['Total Exams: 2,564 Total Students: 947 Scored 3 or higher: 92% AP Subjects % Scoring 3 or Higher']);
+  assert.strictEqual(f.enrollment.value, '947', JSON.stringify(f.enrollment));
+  f = facts(['Total students: 845']);
+  assert.strictEqual(f.enrollment.value, '845');
+});
+check('enrollment: a day-only or boarding-only count loses to the whole-school number (Woodside Priory)', () => {
+  const f = facts(['57 Boarding Students (Grades 9-12)', 'Total Enrollment 427']);
+  assert.strictEqual(f.enrollment.value, '427', JSON.stringify(f.enrollment));
+  const only = facts(['57 Boarding Students (Grades 9-12)']);
+  assert.ok(only.enrollment.status !== 'found' || /only the day or only the boarding/.test(only.enrollment.note || ''), JSON.stringify(only.enrollment));
+});
+check('ratio: "collaboration" is not "ratio", and a clock time is not a ratio (Pingry)', () => {
+  const f = facts(['10:00 AM Read More about LS Faculty Collaboration Morning Schedule | LS Classes begin at 10:00 a.m.', 'The faculty collaboration time is 8:30 for students and teachers']);
+  assert.strictEqual(f.ratio.status, 'none', JSON.stringify(f.ratio));
+  assert.strictEqual(facts(['Student-teacher ratio 10:1, with classes starting at 10:00 a.m.']).ratio.value, '10:1');
+});
+check('counselors: "our five counselors" on the college counseling page is a stated number, and a counted value can be compared (Lakeside)', () => {
+  let f = run([page('https://school.example/academics/college-counseling', ['college'], ['A professional team: Our five counselors’ expertise is drawn from more than 50 years of collective college counseling experience.'])]);
+  assert.strictEqual(f.counselors.value, '5'); assert.strictEqual(f.counselors.num, 5);
+  f = run([page('https://school.example/academics/college-counseling', ['college'], ['Our student life team includes 21 peer counselors and five grade-level deans.'])]);
+  assert.notStrictEqual(f.counselors.value, '21', 'peer counselors are students');
+  f = run([page('https://school.example/academics/college-counseling/team', ['college'], [
+    'Ari Worthman, director of college counseling', 'Erin Foster, associate director of college counseling', 'Frances Nan, associate director of college counseling'])]);
+  assert.strictEqual(f.counselors.num, 3, 'a count of titles carries its number so the sheet can be compared');
+  assert.strictEqual(compareField('counselors', [{ text: '3 Ari Worthman ...' }], f.counselors), 'match');
+  assert.strictEqual(compareField('counselors', [{ text: '7 Ari Worthman ...' }], f.counselors), 'differs');
+});
+check('decision date: an early-round or late-applicant date loses to the regular one (Pingry, Deerfield, Trinity)', () => {
+  const f = run([page('https://school.example/apply/process', ['admissions', 'process'], [
+    'December 10, 2026 - Early Action (Grade 9 only) Admission Decisions are published in the admissions portal',
+    'February 18, 2027 - Regular Admission Decisions are published in the admissions portal',
+  ])]);
+  assert.strictEqual(f.decisionDate.value, 'February 18, 2027', JSON.stringify(f.decisionDate));
+  const only = run([page('https://school.example/apply/process', ['admissions', 'process'], [
+    'December 10, 2026 - Early Action Admission Decisions are published in the admissions portal'])]);
+  assert.strictEqual(only.decisionDate.confidence, 'low'); assert.ok(/early-round/.test(only.decisionDate.note), 'with no main date, the early one is shown but flagged');
+});
+check('dates: a kindergarten calendar is not a middle or upper school\'s, and an open house is not the application opening (Dalton, Trinity, Overlake)', () => {
+  const kg = run([page('https://school.example/apply/steps', ['admissions', 'process'], ['Kindergarten applications open on August 13 and will be accepted until November 13.'])], { division: 'upper' });
+  assert.strictEqual(kg.applicationOpenDate.status, 'none', JSON.stringify(kg.applicationOpenDate));
+  const lower = run([page('https://school.example/apply/steps', ['admissions', 'process'], ['Kindergarten applications open on August 13 and will be accepted until November 13.'])], { division: 'lower' });
+  assert.strictEqual(lower.applicationOpenDate.status, 'found');
+  const oh = run([page('https://school.example/admissions/visit', ['admissions', 'visit'], ['Sunday, December 13th, 2026 — You can register for an Open House through your application account.'])]);
+  assert.strictEqual(oh.applicationOpenDate.status, 'none', JSON.stringify(oh.applicationOpenDate));
+});
+
 // -------------------------------------------------------------------- location ---
 check('location: hotels and restaurants on a visitor page are not the school (Choate, Deerfield); "Suite" in a real address is fine', () => {
   const hotels = run([page('https://school.example/visit/lodging', ['visit'], [
@@ -79,6 +132,30 @@ check('location: hotels and restaurants on a visitor page are not the school (Ch
   const real = run([page('https://school.example/contact', ['about'], ['Proof School, 221 Main Street, Suite 104, San Francisco, CA 94105'])]);
   assert.strictEqual(real.location.status, 'found');
   assert.ok(/221 Main Street/.test(real.location.value), real.location.value);
+});
+
+check('location: a campus label in another block picks the campus for this division, and two addresses in one town are not told apart by town (Pingry, Sidwell, Nueva, Harker)', () => {
+  const campuses = (division, extra) => run([page('https://school.example/contact', ['contact'], [
+    'Basking Ridge Campus: Grades 6–12', '131 Martinsville Road, Basking Ridge, NJ 07920',
+    'Short Hills Campus: Grades K-5', '50 Country Day Drive, Short Hills, NJ 07078',
+    ...(extra || [])])], { division });
+  let f = campuses('lower');
+  assert.ok(/Country Day Drive/.test(f.location.value), f.location.value);
+  assert.ok(/labels this campus for this division/.test(f.location.note), f.location.note);
+  f = campuses('upper');
+  assert.ok(/Martinsville Road/.test(f.location.value) && /labels this campus/.test(f.location.note), JSON.stringify(f.location));
+  // "Grade 6 through Grade 8 in Basking Ridge": the wording on an admissions page
+  f = run([page('https://school.example/contact', ['contact'], ['131 Martinsville Road, Basking Ridge, NJ 07920', '50 Country Day Drive, Short Hills, NJ 07078']),
+    page('https://school.example/apply', ['admissions'], ['Kindergarten through Grade 5 in Short Hills, New Jersey', 'Grade 6 through Grade 8 in Basking Ridge, New Jersey'])], { division: 'middle' });
+  assert.ok(/Martinsville Road/.test(f.location.value) && /Grade 6 through Grade 8 in Basking Ridge/.test(f.location.note), JSON.stringify(f.location));
+  // nothing says which campus: the rule still answers but says to check
+  const footer = ['131 Martinsville Road, Basking Ridge, NJ 07920', '50 Country Day Drive, Short Hills, NJ 07078'];
+  f = run(['contact', 'about', 'visit'].map((t) => page('https://school.example/' + t, [t], footer)), { division: 'middle' });
+  assert.ok(/check which campus/.test(f.location.note || ''), JSON.stringify(f.location));
+  // two campuses in the same town cannot be told apart by the town name, so a "Middle School in San Jose" line must not decide
+  f = run([page('https://school.example/contact', ['contact'], [
+    'Middle School in San Jose', '4525 Union Ave., San Jose, CA 95124', '500 Saratoga Ave., San Jose, CA 95129'])], { division: 'middle' });
+  assert.ok(!/labels this campus/.test(f.location.note || ''), 'same-town campuses are not separated by a town label: ' + JSON.stringify(f.location));
 });
 
 // ------------------------------------------------------------------- open date ---
@@ -137,6 +214,27 @@ check('comparison: hedge words become ranges, so "1,823" agrees with "More than 
 });
 check('comparison: a stray space after the comma in a typed price does not break the match (Eastside Catholic)', () => {
   assert.strictEqual(compareField('tuition', [{ text: '2026-27 Tuition Middle School: $33, 750 | High School: $33, 750' }], { status: 'found', value: 'x $33,750', num: 33750 }), 'match');
+});
+
+check('mission: "Admissions" is not a mission heading, and a quoted testimonial is not a mission statement (ACS Cobham, Aiglon, BASIS, Pingry)', () => {
+  const adm = page('https://school.example/admissions', ['admissions'], [
+    { k: 'h', level: 2, text: 'Admissions' },
+    'A warm welcome to our school. Whether you are making an international move or changing schools locally, we make admissions smooth.',
+  ]);
+  assert.strictEqual(run([adm]).mission.status, 'none', 'an Admissions heading must not produce a mission');
+  const quote = page('https://school.example/about', ['about'], [
+    { k: 'h', level: 2, text: 'Our Mission' },
+    '“Welcoming, nurturing environment. Plenty of opportunities for the student to participate. My child is very happy here.”',
+    'We inspire every student to think critically, act with integrity and build a life of service to the wider community.',
+  ]);
+  const m = run([quote]).mission;
+  assert.strictEqual(m.status, 'found');
+  assert.ok(m.value.startsWith('We inspire every student'), 'the quoted line is skipped, the real statement is used: ' + m.value);
+  const real = page('https://school.example/about/mission', ['about'], [
+    { k: 'h', level: 2, text: 'Mission & Values' },
+    'Our mission is to develop curious, capable and kind young people ready to lead in a changing world.',
+  ]);
+  assert.strictEqual(run([real]).mission.status, 'found', 'a real "Mission & Values" heading still works');
 });
 
 console.log(`\n${passed} checks passed.`);

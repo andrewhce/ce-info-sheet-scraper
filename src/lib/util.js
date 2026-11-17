@@ -4,12 +4,31 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');   // the school-info-scraper folder
-const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, 'data');   // on a server: the folder that survives restarts
+
+/**
+ * Picks where saved workbooks, scrape results and settings live:
+ *  1. DATA_DIR env var (servers, Docker, tests)
+ *  2. %LocalAppData%\SchoolInfoSheet\data on Windows portable builds so unzipping an update keeps user data
+ *     (unless this folder's own data/ already contains a workbook or imported school list)
+ *  3. ./data inside the project folder
+ */
+function resolveDataDir(root = ROOT, env = process.env, platform = process.platform) {
+  if (env.DATA_DIR) return path.resolve(env.DATA_DIR);
+  const localData = path.join(root, 'data');
+  if (platform === 'win32' && env.LOCALAPPDATA && fs.existsSync(path.join(root, '.portable-build'))) {
+    const hasLocal = fs.existsSync(path.join(localData, 'schools.json')) || fs.existsSync(path.join(localData, 'workbook.xlsx'));
+    if (!hasLocal) return path.join(env.LOCALAPPDATA, 'SchoolInfoSheet', 'data');
+  }
+  return localData;
+}
+
+const DATA = resolveDataDir();
 const PATHS = {
   root: ROOT,
   src: path.join(ROOT, 'src'),
   public: path.join(ROOT, 'src', 'public'),
   data: DATA,
+  isPortable: fs.existsSync(path.join(ROOT, '.portable-build')),
   config: path.join(ROOT, 'config.json'),
   workbook: path.join(DATA, 'workbook.xlsx'),      // the sheet chosen in the dashboard
   template: path.join(DATA, 'template.json'),
@@ -21,8 +40,8 @@ const PATHS = {
 
 function loadConfig() {
   const cfg = JSON.parse(fs.readFileSync(PATHS.config, 'utf8'));
-  const n = Number(process.env.CRAWL_PARALLEL_SITES);          // lets a small server read fewer websites at once
-  if (n >= 1 && n <= 12) cfg.crawl.parallelSites = Math.floor(n);
+  const n = Number(process.env.CRAWL_PARALLEL_SITES);          // lets a small server or fast connection tune website concurrency
+  if (n >= 1 && n <= 24) cfg.crawl.parallelSites = Math.floor(n);
   return cfg;
 }
 
@@ -35,10 +54,11 @@ function readJson(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 
-function writeJson(file, value) {
+function writeJson(file, value, opts = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 1), 'utf8');
+  const ws = opts && opts.mode ? { encoding: 'utf8', mode: opts.mode } : 'utf8';
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 1), ws);
   fs.renameSync(tmp, file);
 }
 
@@ -76,4 +96,16 @@ function baseDomain(host) {
   return two;
 }
 
-module.exports = { PATHS, loadConfig, resolveWorkbook, readJson, writeJson, slug, alnum, squash, oneLine, clip, baseDomain };
+/** Scrub API keys, Slack webhooks, bearer tokens, and secret query params before logging or displaying errors. */
+function redactSecrets(text) {
+  return String(text == null ? '' : text)
+    .replace(/\bsk-ant-[A-Za-z0-9_-]{8,}/g, 'sk-ant-[REDACTED]')
+    .replace(/\bgsk_[A-Za-z0-9_-]{8,}/g, 'gsk_[REDACTED]')
+    .replace(/\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{16,}/g, 'sk-[REDACTED]')
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}/g, 'AIza[REDACTED]')
+    .replace(/https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/gi, 'https://hooks.slack.com/services/[REDACTED]')
+    .replace(/(\bBearer\s+)[A-Za-z0-9._~+/-]{16,}=*/gi, '$1[REDACTED]')
+    .replace(/([?&](?:token|key|secret|api_key)=)[^&\s'"]+/gi, '$1[REDACTED]');
+}
+
+module.exports = { PATHS, resolveDataDir, loadConfig, resolveWorkbook, readJson, writeJson, slug, alnum, squash, oneLine, clip, baseDomain, redactSecrets };

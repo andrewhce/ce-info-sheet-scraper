@@ -63,6 +63,11 @@ connection**. "Anyone" only makes the address reachable; the script refuses ever
 If the deploy screen only offers your organization, this route cannot work, because the dashboard on a computer cannot sign in to Google.
 Use the file route above instead.
 
+**The Start here checklist reports what is true, not just that an address is saved.** A saved address is shown as *not tested yet* until
+you press **Test the connection** (or a send is tried), then as *working* or *does NOT work* with Google's reason, from what that last call did.
+While it does not work the school page hides the one-click button and says why; the file download is unaffected. **Remove saved address**
+(in the same Advanced panel) forgets the address and secret.
+
 ## Checking it
 
 `npm test` runs `tests/apps-script.test.js`, which runs `Code.gs` against a fake Google Sheet built from your real workbook tabs, loads a

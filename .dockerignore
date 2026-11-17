@@ -10,5 +10,7 @@ docs
 Start Dashboard.cmd
 Check Setup.cmd
 .env
+.env.*
+deploy/digitalocean/.env
 dist
 tools

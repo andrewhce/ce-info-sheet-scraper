@@ -403,7 +403,7 @@ const check = (name, fn) => { fn(); passed++; console.log('  ok   ' + name); };
   // 9. the Node side talks to the web app correctly
   const http = require('http');
   const seen = [];
-  const srv = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { seen.push({ method: req.method, type: req.headers['content-type'], body: JSON.parse(b || '{}') }); if (req.url.startsWith('/html')) { res.end('<html>sign in</html>'); } else res.end(JSON.stringify({ ok: true, tab: 'T', tabUrl: 'https://x', summary: { filled: 1 } })); }); });
+  const srv = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { seen.push({ method: req.method, type: req.headers['content-type'], body: JSON.parse(b || '{}') }); if (req.url.startsWith('/html')) { res.end('<html>sign in</html>'); } else if (req.url.startsWith('/err')) { res.end(JSON.stringify({ ok: false, error: 'Wrong secret' })); } else res.end(JSON.stringify({ ok: true, tab: 'T', tabUrl: 'https://x', summary: { filled: 1 } })); }); });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const port = srv.address().port;
   const cfgFile = path.join(PATHS.data, 'export-config.json');
@@ -411,7 +411,9 @@ const check = (name, fn) => { fn(); passed++; console.log('  ok   ' + name); };
   const hadHist = fs.existsSync(path.join(PATHS.data, 'exports.json')) ? fs.readFileSync(path.join(PATHS.data, 'exports.json')) : null;
   try {
     fs.writeFileSync(cfgFile, JSON.stringify({ url: `http://127.0.0.1:${port}/ok`, token: TOKEN }));
+    assert.strictEqual(sheetExport.publicConfig().health, 'untested', 'a saved address that was never tried is not called connected');
     const out = await sheetExport.exportSchool('castilleja-upper-school', 0);
+    assert.strictEqual(sheetExport.publicConfig().health, 'working');
     assert.strictEqual(out.tab, 'T');
     assert.strictEqual(seen[0].method, 'POST');
     assert.strictEqual(seen[0].body.token, TOKEN);
@@ -422,6 +424,32 @@ const check = (name, fn) => { fn(); passed++; console.log('  ok   ' + name); };
     await assert.rejects(() => sheetExport.testConnection(), /web page instead of an answer/);
     await assert.rejects(() => sheetExport.exportSchool('beau-soleil', 0), /not been scraped/);
     passed++; console.log('  ok   dashboard side: sends the secret, reads the answer, explains non-JSON replies');
+
+    // the saved address's health follows what its last call did (a sign-in page means it cannot work from this computer)
+    let pc = sheetExport.publicConfig();
+    assert.strictEqual(pc.health, 'failing'); assert.ok(/web page instead of an answer/.test(pc.lastError) && pc.lastCheckAt);
+    assert.ok(!JSON.stringify(pc).includes(TOKEN), 'the secret is never part of the public view');
+    // a script that answers with its own error was reached: only a failed ping counts against the address
+    fs.writeFileSync(cfgFile, JSON.stringify({ url: `http://127.0.0.1:${port}/err`, token: TOKEN }));
+    await assert.rejects(() => sheetExport.exportSchool('castilleja-upper-school', 0), /Wrong secret/);
+    assert.strictEqual(sheetExport.publicConfig().health, 'working', 'a script error on an export does not mean the address is unreachable');
+    await assert.rejects(() => sheetExport.testConnection(), /Wrong secret/);
+    assert.strictEqual(sheetExport.publicConfig().health, 'failing', 'a failed test does');
+    sheetExport.saveConfig({ url: 'https://script.google.com/macros/s/abc123/exec', token: TOKEN });
+    assert.strictEqual(sheetExport.publicConfig().health, 'untested', 'a newly saved address starts untested');
+    sheetExport.clearConfig();
+    pc = sheetExport.publicConfig();
+    assert.deepStrictEqual([pc.configured, pc.health], [false, 'none']);
+    // the Start here checklist says what is true, not just that an address exists
+    const setupText = (cfg) => { if (cfg) fs.writeFileSync(cfgFile, JSON.stringify(cfg)); else fs.rmSync(cfgFile, { force: true }); const it = require('../src/setup-check').checkSetup().find((x) => x.id === 'google'); return it.detail + ' ' + (it.action || ''); };
+    assert.ok(!/connected|works/.test(setupText(null)));
+    assert.ok(/not been tested/.test(setupText({ url: `http://127.0.0.1:${port}/ok`, token: TOKEN })));
+    sheetExport.recordCheck(false, 'Google sent back a web page instead of an answer. This happens when the web app is only open to your organization: this program cannot sign in to Google.');
+    const failing = setupText({ ...JSON.parse(fs.readFileSync(cfgFile, 'utf8')) });
+    assert.ok(/does NOT work/.test(failing) && /only open to your organization/.test(failing) && /Remove saved address/.test(failing));
+    sheetExport.recordCheck(true);
+    assert.ok(/One-click send works/.test(setupText({ ...JSON.parse(fs.readFileSync(cfgFile, 'utf8')) })));
+    passed++; console.log('  ok   Google Sheet one-click: untested / working / failing follow what the last call did, and the checklist says so');
   } finally {
     srv.close();
     if (hadCfg) fs.writeFileSync(cfgFile, hadCfg); else fs.rmSync(cfgFile, { force: true });

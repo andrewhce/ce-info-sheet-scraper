@@ -84,9 +84,11 @@ const swaps = [
   ['href="/styles.css"', 'href="styles.css"'],
   ['src="/app.js"', 'src="app.js"'],
   ['<title>School Info Sheet</title>', '<title>School Info Sheet (read-only)</title>\n<meta name="robots" content="noindex, nofollow">'],
-  ['<a href="#/run" data-view="run">Run scraper</a>\n    ', ''],
-  ['<a href="#/start" data-view="start">Start here</a>\n    ', ''],
-  ['<a href="#/ask" data-view="ask">Ask</a>\n    ', ''],           // the read-only copy has no server, so no assistant
+  ['    <a href="#/run" data-view="run" title="Read the schools’ websites">Check websites</a>\n', ''],
+  ['    <a href="#/start" data-view="start">Start here</a>\n', ''],
+  ['    <a href="#/ask" data-view="ask" title="Ask the AI assistant a question about the schools">Ask</a>\n', ''],           // the read-only copy has no server, so no assistant
+  ['    <a href="#/accuracy" data-view="accuracy" title="How often the answers are right">Accuracy</a>\n', ''],   // nor spot-checks
+  ['    <a href="#/review" data-view="review" title="The answers the dashboard is least sure about">To check</a>\n', ''],         // nor the review queue (it needs the server)
 ];
 for (const [from, to] of swaps) {
   if (!html.includes(from)) { console.error(`src/public/index.html no longer contains: ${from}\nUpdate deploy/build-static.js to match.`); process.exit(1); }

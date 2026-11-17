@@ -18,6 +18,7 @@ const COUNTER_ATTRS = ['data-count', 'data-to', 'data-target', 'data-number', 'd
 function zoneOf(el, tag, inContent) {
   const a = el.attribs || {};
   const role = (a.role || '').toLowerCase();
+  if (tag === 'main' || role === 'main') return 'main';
   if (tag === 'nav' || role === 'navigation') return 'nav';
   if (role === 'contentinfo') return 'footer';
   if (role === 'banner') return 'header';
@@ -25,11 +26,16 @@ function zoneOf(el, tag, inContent) {
   // (for example the title bar of a tab panel), not to the site chrome
   if (tag === 'footer') return inContent ? null : 'footer';
   if (tag === 'header') return inContent ? null : 'header';
-  if (tag === 'body' || tag === 'html' || tag === 'main' || tag === 'article') return null;
+  if (tag === 'body' || tag === 'html' || tag === 'article') return null;
   const idc = ((a.id || '') + ' ' + (a.class || ''));
-  if (/\bfs(Navigation|Menu)\b|(^|[\s_-])(nav|navbar|navigation|menu|mega-?menu|breadcrumbs?)([\s_-]|$)/i.test(idc)) return 'nav';
-  if (/\bfsFooter\b|(^|[\s_-])(footer|site-footer)([\s_-]|$)/i.test(idc)) return 'footer';
-  if (/\bfsHeader\b|(^|[\s_-])(site-header|page-header-nav|masthead)([\s_-]|$)/i.test(idc)) return 'header';
+  // Ignore outer wrapper state/animation target classes (e.g. Webflow ".menu-target", ".has-nav", ".nav-open")
+  const cleanIdc = idc
+    .split(/\s+/)
+    .filter((t) => t && !/(?:^|[-_])(?:target|backdrop|open|opened|closed|trigger|toggle|push)(?:$|[-_])|^(?:has|no|with|is)[-_]/i.test(t))
+    .join(' ');
+  if (/\bfs(Navigation|Menu)\b|(^|[\s_-])(nav|navbar|navigation|menu|mega-?menu|breadcrumbs?)([\s_-]|$)/i.test(cleanIdc)) return 'nav';
+  if (/\bfsFooter\b|(^|[\s_-])(footer|site-footer)([\s_-]|$)/i.test(cleanIdc)) return 'footer';
+  if (/\bfsHeader\b|(^|[\s_-])(site-header|page-header-nav|masthead)([\s_-]|$)/i.test(cleanIdc)) return 'header';
   return null;
 }
 
@@ -107,8 +113,9 @@ function parseHtml(html, baseUrl) {
       const tag = child.name.toLowerCase();
       if (SKIP.has(tag)) continue;
       if (tag === 'br') { buf += '\n'; continue; }
-      const z = zone !== 'main' ? zone : (zoneOf(child, tag, inContent) || zone);
-      const ic = inContent || tag === 'main' || tag === 'article' || tag === 'section';
+      const nextZone = zoneOf(child, tag, inContent);
+      const z = nextZone === 'main' ? 'main' : (zone !== 'main' ? zone : (nextZone || zone));
+      const ic = inContent || tag === 'main' || tag === 'article' || tag === 'section' || nextZone === 'main';
       if (tag === 'tr') {
         const row = simpleRow(child);
         flush(kind, zone, level);

@@ -5,13 +5,14 @@
   "port": 4477,
   "crawl": {
     "userAgent": "SchoolInfoSheetBot/1.0 (polite research crawler; reads public school pages only)",
-    "delayMs": 1500,
-    "timeoutMs": 25000,
-    "parallelSites": 6,
+    "delayMs": 1000,
+    "timeoutMs": 20000,
+    "parallelSites": 12,
     "maxPagesPerSite": 40,
     "maxPdfsPerSite": 4,
     "maxHtmlBytes": 4000000,
     "maxPdfBytes": 20000000,
-    "cacheDays": 7
+    "cacheDays": 7,
+    "headlessFallback": true
   }
 }

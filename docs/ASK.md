@@ -1,8 +1,9 @@
 # The Ask page (AI assistant)
 
-A chat inside the dashboard. You ask a question about the schools in plain English; it looks things up in what is already saved
-(the scraper's findings and your sheet) and answers with the source shown. It is a **prototype**: it only reads, and it only
-knows the School Info Sheet data (plus the web, if you switch web search on).
+A chat inside the dashboard **strictly for private school research and your School Information Sheet**. You ask a school-related
+question in plain English; it looks things up in what is already saved (the scraper's findings and your sheet) and answers with the
+source shown. General non-school questions (trivia, coding, creative writing, weather, etc.) are turned off, and the assistant only
+reads saved data unless you switch web search on.
 
 ## Try it in two minutes
 
@@ -33,22 +34,24 @@ models your key can use.
 
 ## What it can and cannot do
 
-- It has six tools: how much is scraped, find a school, everything saved about one school, list findings (differs, can fill,
-  matches), prepare a scrape button, prepare a Google Sheet file button.
-- **Nothing is changed without your click.** There is no tool that writes, sends, publishes or deletes. A scrape or a Google Sheet
-  file is only ever offered as a button; the button runs the same dashboard action as the page that already exists.
-- Every fact it gives comes from a tool result, with the website page and quote, and the confidence. If a tool finds nothing it
-  says so. It is told never to answer a school fact from memory.
+- It has ten read-only/proposal tools: coverage overview, find schools (including recently updated websites), full school facts (with website changes & URL mismatch flags), search already-cached website pages for keywords, search past verified Q&As (`search_past_answers`), list findings (differs, can fill, matches), check auto-scrape schedule & Slack status, prepare a scrape button, prepare a Google Sheet file button, and prepare an Excel/CSV spreadsheet download button.
+- Earlier answers are kept in `data/agent-kb.json` as **hints, not facts** (plus declarative user rules/corrections in `data/agent-memory.json`), and `GET /api/ask/dataset` exports them as `.jsonl`. An answer is kept only if at least one real lookup (a school tool or a web search) was behind it. The assistant is told never to state a figure from a past answer and to confirm every fact with the data tools, and that a tool result wins if they disagree. Asking the same question again replaces the old answer (the newest wins, so two contradictory answers to one question cannot both stay), and an entry is flagged "possibly out of date" when the school was scraped again since, or when it is more than 14 days old.
+- **Nothing is changed without your click.** There is no tool that writes, sends, publishes or deletes. A scrape or export is only ever offered as a button; the button runs the same dashboard action as the page that already exists.
+- Every fact it gives comes from a tool result, with the website page and quote, and the confidence. If a tool finds nothing it says so. It is told never to answer a school fact from memory.
 - Web page text is treated as data. A school page that says "ignore your instructions" is just text in a quote.
 - It cannot see anything else at Cardinal (marketing, leads, tutoring, HR) yet, and it says so.
+- Security, caching & persistence:
+  1. A normalized pre-filter strips invisible characters and leetspeak obfuscation, blocking prompt injections, rule bypasses, and off-topic/marketing/SaaS traps before any API call.
+  2. When a question lacks clear school terms or mixes school names with risky framing, a lightweight secondary AI scope classifier checks intent (with conversation history summary) before full model execution or web search runs.
+  3. The assistant treats quoted page snippets, search results, and saved memory strictly as data — never instructions — separates static system instructions from saved memory for stable prompt caching, streams answers live as they arrive, and scrubs API keys and webhooks from logs.
+  4. **Memory (`data/agent-memory.json` & `data/agent-sessions.json`):** Conversations persist safely across dashboard restarts (**Recent chats**, **Rename**, **Delete**, and **New chat**), turn slicing keeps `tool_use`/`tool_result` pairs intact, and you can add, edit, or delete school-research notes via the **Saved memory** panel or `"Remember that …"` / `"Forget …"` in chat.
 - It can search the web, but only if you switch that on (see "Web search" below).
 
 ## Web search (Claude only, off by default)
 
 In **AI settings**, tick **Let the assistant search the web** and Save. A "Web search on" tag then shows above the chat.
 
-- **What it is for:** a school that has not been scraped yet, or something that is not on a school's own website. If the saved data has
-  the fact, the assistant is told to use that, not the web.
+- **What it is for:** school and admissions questions when the saved data cannot answer (for example a school that has not been scraped yet, or admissions details not on its website). General non-school web searches remain blocked. If the saved data already has the fact, the assistant is told to use that first.
 - **It is not the scraper.** Web results are other people's pages. They are labelled "From the web, not the school's own site", each source is
   listed under the answer with a warning, and nothing from the web is ever put into a comparison with your sheet or into the Google Sheet file.
   The scraper's own rule (only a school's own website) is unchanged.
@@ -71,8 +74,7 @@ until you raise it. Groq's spend is not tracked here: check it in the Groq conso
 ## What it records
 
 Every question and answer, the tools it used and the estimated cost are appended to `data/agent-log.jsonl`, and every call to
-`data/agent-usage.jsonl`. Keys are never written there. Use the log to review mistakes (it is the start of an accuracy test).
-Conversations live in memory and start fresh when the dashboard restarts; **New chat** clears one.
+`data/agent-usage.jsonl`. Keys are never written there (and accidental keys or webhooks in prompts/errors are redacted). Saved long-term preferences live in `data/agent-memory.json` and chat threads persist across restarts in `data/agent-sessions.json` (**New chat** starts a fresh thread; **Delete** removes a saved thread).
 
 ## On a server (online)
 
@@ -95,12 +97,10 @@ what data may be sent before a second division's data is connected (customer det
 
 ## How it works (for the person who builds on it)
 
-`src/agent/`: `index.js` (conversations, settings, one question at a time), `agent.js` (the loop: ask the AI, run the tools it
-picks, hand the results back, repeat up to 8 rounds), `tools.js` (the six read-only tools), `providers.js` (Claude and Groq behind one
-shape; the conversation is kept in Claude's message format), `prompt.js` (the standing instructions), `settings.js`, `usage.js`.
+`src/agent/`: `index.js` (persisted conversations, settings, memory & auto-learning KB orchestration), `agent.js` (the loop: stream answers, run tools, retry/stop safely), `tools.js` (the ten read-only/proposal tools), `providers.js` (Claude streaming + prompt caching + model discovery, and Groq), `prompt.js` (standing instructions, normalized pre-filter, memory command parser & auto-rule detector), `scope-guard.js` (secondary AI intent classifier), `memory.js` (validated saved memories & persistent sessions), `kb.js` (automatic Q&A knowledge base, staleness check & JSONL export), `settings.js` (Sonnet 5.5 + Medium cost lock), `usage.js`.
 The server streams a question's progress to the page one JSON line at a time (`POST /api/ask`). `tests/agent.test.js` checks all of
 it with stand-ins for the AI services, so it needs no key.
 
-Claude calls use the `claude-opus-5-5` model by default with `output_config.effort: "medium"`, adaptive thinking left on, and the
+Claude calls are cost-locked by default to `claude-sonnet-5-5` with `output_config.effort: "medium"`, adaptive thinking left on, and the
 server-side **fallback** option switched on (if the safety filter declines a request, the API retries it on a substitute model
-inside the same call). Switch it off by setting `"fallbacks": false` in `data/agent-settings.json`.
+inside the same call). Switch it off by setting `"fallbacks": false` in `data/agent-settings.json` (or set `ASK_UNLOCK_MODELS=1` to unlock model/effort selection).

@@ -8,18 +8,26 @@
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="#/">School Info Sheet<span>website scraper</span></a>
+  <a class="brand" href="#/">School Info Sheet<span>website checker</span></a>
   <nav class="tabs" id="nav">
     <a href="#/start" data-view="start">Start here</a>
     <a href="#/" data-view="schools">Schools</a>
-    <a href="#/ask" data-view="ask">Ask</a>
-    <a href="#/run" data-view="run">Run scraper</a>
-    <a href="#/script" data-view="script">Script</a>
+    <a href="#/review" data-view="review" title="The answers the dashboard is least sure about">To check</a>
+    <a href="#/run" data-view="run" title="Read the schools’ websites">Check websites</a>
+    <a href="#/ask" data-view="ask" title="Ask the AI assistant a question about the schools">Ask</a>
+    <a href="#/accuracy" data-view="accuracy" title="How often the answers are right">Accuracy</a>
+    <a href="#/help" data-view="help" title="What the words and colours mean">Help</a>
   </nav>
   <a class="jobpill" id="jobpill" href="#/run" hidden></a>
   <div class="who" id="who" hidden></div>
 </header>
 <main id="app"><p class="loading">Loading&hellip;</p></main>
+<footer class="appfoot" id="appfoot">
+  <a href="#/script" class="muted">Technical details (for IT staff)</a>
+  <span class="spacer"></span>
+  <span id="dataloc" class="muted" hidden></span>
+  <button type="button" class="btn link small" id="quitbtn" hidden>Turn off dashboard</button>
+</footer>
 <script src="/app.js"></script>
 </body>
 </html>

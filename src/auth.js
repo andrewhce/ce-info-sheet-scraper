@@ -106,6 +106,16 @@ function hostAllowed(hostHeader) {
   try { return host === new URL(settings.publicUrl).hostname.toLowerCase(); } catch { return false; }
 }
 
+/** Rejects cross-site browser requests (Origin / Sec-Fetch-Site) on API and POST endpoints. */
+function originAllowed(req) {
+  const site = String(req.headers['sec-fetch-site'] || '').toLowerCase().trim();
+  if (site && site !== 'same-origin' && site !== 'none') return false;
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  if (origin === 'null') return false;
+  try { return hostAllowed(new URL(origin).host); } catch { return false; }
+}
+
 // -------------------------------------------------------------- sign-in flow ---
 
 const redirectUri = () => settings.publicUrl + '/auth/callback';
@@ -200,4 +210,4 @@ async function handle(req, res, url, send) {
   return true;
 }
 
-module.exports = { settings, enabled, loopbackOnly, problems, sessionUser, hostAllowed, handle, sign, verify };
+module.exports = { settings, enabled, loopbackOnly, problems, sessionUser, hostAllowed, originAllowed, handle, sign, verify };

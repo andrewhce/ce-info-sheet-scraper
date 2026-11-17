@@ -17,6 +17,9 @@ const { Fetcher } = require('./lib/fetcher');
 const { crawlSite, cleanStart } = require('./lib/crawl');
 const { extractSchool } = require('./lib/rules');
 const { siteIdentity } = require('./lib/identity');
+const { diffFields } = require('./lib/changes');
+const scheduler = require('./lib/scheduler');
+const { createSlack } = require('./lib/slack');
 
 const SCRAPER_VERSION = '1.1.0';
 
@@ -32,7 +35,7 @@ function writeLock(info) { try { writeJson(LOCK, { pid: process.pid, ...info });
 function clearLock() { try { const l = readJson(LOCK); if (l && l.pid === process.pid) fs.unlinkSync(LOCK); } catch { /* not fatal */ } }
 
 function parseArgs(argv) {
-  const a = { tier: null, school: [], all: false, pending: false, refresh: false, limit: null, json: false };
+  const a = { tier: null, school: [], all: false, pending: false, refresh: false, headless: true, runDue: false, limit: null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--tier') a.tier = Number(argv[++i]);
@@ -40,6 +43,8 @@ function parseArgs(argv) {
     else if (k === '--all') a.all = true;
     else if (k === '--pending') a.pending = true;
     else if (k === '--refresh') a.refresh = true;
+    else if (k === '--no-headless') a.headless = false;
+    else if (k === '--run-due') a.runDue = true;
     else if (k === '--limit') a.limit = Number(argv[++i]);
     else if (k === '--progress-json') a.json = true;
   }
@@ -72,20 +77,38 @@ function summarize(fields) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  let args = parseArgs(process.argv.slice(2));
   const cfg = loadConfig();
   const data = readJson(PATHS.schools);
-  if (!data) { console.error('No school list yet. Run:  node src/import-workbook.js'); process.exit(1); }
+  if (!data) { console.error('No school list yet. Run:  node src/import-workbook.js'); process.exit(args.runDue ? 0 : 1); }
+
+  let dueSchedule = null;
+  let scheduledLabel = null;
+  if (args.runDue) {
+    const st = scheduler.load();
+    if (!scheduler.isDue(st)) { console.log('No scheduled check due yet.'); process.exit(0); }
+    const cmd = scheduler.scopeCommand(st.scope, st.refresh);
+    const parsedCmd = parseArgs(cmd.args);
+    args = { ...args, ...parsedCmd, runDue: true, headless: args.headless, json: args.json };
+    dueSchedule = st;
+    scheduledLabel = cmd.label;
+  }
+
   const targets = pickSchools(data.schools, args);
   if (!targets) {
     console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 14).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
     process.exit(0);
   }
-  if (!targets.length) { console.error('No schools matched.'); process.exit(1); }
+  if (!targets.length) { console.error('No schools matched.'); process.exit(args.runDue ? 0 : 1); }
   const busy = otherRun();
-  if (busy) { console.error(`Another scrape is already running (${busy.label}, ${busy.done || 0} of ${busy.schools} schools done). Wait for it to finish or stop it first.`); process.exit(2); }
-  const label = args.school.length ? (targets.length === 1 ? targets[0].name : `${targets.length} selected schools`)
-    : args.tier != null ? `Tier ${args.tier} schools` : args.pending ? 'Schools not scraped yet' : 'All schools';
+  if (busy) {
+    if (args.runDue) { console.log('Skipped scheduled run because another scrape is already running.'); process.exit(0); }
+    console.error(`Another scrape is already running (${busy.label}, ${busy.done || 0} of ${busy.schools} schools done). Wait for it to finish or stop it first.`);
+    process.exit(2);
+  }
+  if (dueSchedule) scheduler.markStarted();
+  const label = scheduledLabel || (args.school.length ? (targets.length === 1 ? targets[0].name : `${targets.length} selected schools`)
+    : args.tier != null ? `Tier ${args.tier} schools` : args.pending ? 'Schools not scraped yet' : 'All schools');
   const lock = { label, startedAt: Date.now(), schools: targets.length, sites: 0, done: 0, sitesDone: 0 };
   writeLock(lock);
   process.on('exit', clearLock);
@@ -114,10 +137,13 @@ async function main() {
     groups.get(start).push(s);
   }
 
-  const fetcher = new Fetcher(cfg, { refresh: args.refresh });
+  const fetcher = new Fetcher(cfg, { refresh: args.refresh, headlessFallback: args.headless });
   const queue = [...groups.entries()];
   const t0 = Date.now();
   let doneSchools = 0;
+  const tpl = readJson(PATHS.template);
+  const labelsMap = new Map(((tpl && tpl.rows) || []).filter((r) => r.kind === 'field' && r.key).map((r) => [r.key, String(r.label || r.key).replace(/:$/, '')]));
+  const scheduledChanges = [];
   lock.sites = queue.length;
   writeLock(lock);
   emit({ type: 'start', sites: queue.length, schools: targets.length });
@@ -143,14 +169,33 @@ async function main() {
         const counts = summarize(fields);
         let identity = null;
         if (crawl.status === 'ok') { try { identity = siteIdentity(s, crawl.pages.filter((p) => p.ok)); } catch { /* the check is only a warning */ } }
-        writeJson(path.join(PATHS.resultsDir, s.id + '.json'), {
-          id: s.id, name: s.name, scrapedAt: new Date().toISOString(), scraperVersion: SCRAPER_VERSION,
+        const outFile = path.join(PATHS.resultsDir, s.id + '.json');
+        const prev = readJson(outFile, null);
+        const changes = crawl.status === 'ok' ? diffFields(prev, fields) : [];
+        const stamp = new Date().toISOString();
+        const changedAt = changes.length ? stamp : (prev && prev.changedAt || null);
+        writeJson(outFile, {
+          id: s.id, name: s.name, scrapedAt: stamp, scraperVersion: SCRAPER_VERSION,
           start, status: crawl.status, detail: crawl.detail, ms: Date.now() - t1, counts, identity,
+          changes, changedAt,
           pages: crawl.pages.map((p) => ({ url: p.finalUrl, title: p.title || p.linkText || '', topics: p.topics || [], kind: p.kind, chars: p.mainChars || 0, fetchedAt: p.fetchedAt })),
           portals: crawl.portals, skipped: crawl.skipped, fields,
         });
         doneSchools++;
-        emit({ type: 'school-done', id: s.id, name: s.name, status: crawl.status, detail: crawl.detail, found: counts.found, total: counts.found + counts.none, done: doneSchools, of: targets.length });
+        if (dueSchedule && changes.length) {
+          scheduledChanges.push({
+            id: s.id,
+            name: s.name,
+            wrongSite: !!(identity && identity.ok === false),   // the listed website does not look like this school
+            fields: changes.map((c) => ({ ...c, label: labelsMap.get(c.key) || c.key })),   // every changed field, in full
+          });
+        }
+        emit({
+          type: 'school-done', id: s.id, name: s.name, status: crawl.status, detail: crawl.detail,
+          found: counts.found, total: counts.found + counts.none,
+          changesCount: changes.length, changes, wrongSite: !!(identity && identity.ok === false),
+          done: doneSchools, of: targets.length,
+        });
       }
       lock.done = doneSchools; lock.sitesDone++;
       writeLock(lock);
@@ -158,7 +203,15 @@ async function main() {
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, cfg.crawl.parallelSites) }, worker));
-  emit({ type: 'done', schools: targets.length, sites: groups.size, requests: fetcher.requests, cacheHits: fetcher.cacheHits, ms: Date.now() - t0 });
+  const durationMs = Date.now() - t0;
+  if (dueSchedule) {
+    scheduler.markFinished({ status: 'ok', summary: { label, schools: doneSchools, updatedSchools: scheduledChanges.length } });
+    await createSlack().notifyRun({
+      label, scheduled: true, stopped: false, exitCode: 0,
+      schoolsDone: doneSchools, schoolsTotal: targets.length, durationMs, changes: scheduledChanges,
+    }).catch(() => {});
+  }
+  emit({ type: 'done', schools: targets.length, sites: groups.size, requests: fetcher.requests, cacheHits: fetcher.cacheHits, ms: durationMs });
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

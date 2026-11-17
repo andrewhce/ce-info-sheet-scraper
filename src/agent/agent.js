@@ -69,6 +69,45 @@ function explainError(e) {
   return 'Something went wrong while asking the AI: ' + msg;
 }
 
+function isThinkingBlock(block) {
+  return !!block && (block.type === 'thinking' || block.type === 'redacted_thinking');
+}
+
+/**
+ * Removes `thinking` and `redacted_thinking` blocks from completed assistant messages so Anthropic does not
+ * reject signature-bound blocks from earlier turns (across KB/memory updates, trimming, or restarts).
+ */
+function stripThinkingFromMessage(msg) {
+  if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.content)) return msg;
+  if (!msg.content.some(isThinkingBlock)) return msg;
+  const kept = msg.content.filter(
+    (b) => b && !isThinkingBlock(b) && (b.type !== 'text' || (typeof b.text === 'string' && b.text.trim().length > 0)),
+  );
+  return { ...msg, content: kept.length ? kept : [{ type: 'text', text: '...' }] };
+}
+
+/** Strips thinking blocks from `history[0 .. upToIndex - 1]` in place. Returns true if any message changed. */
+function stripThinkingFromHistory(history, upToIndex = Array.isArray(history) ? history.length : 0) {
+  if (!Array.isArray(history) || !history.length) return false;
+  const end = Math.min(history.length, Math.max(0, upToIndex));
+  let changed = false;
+  for (let i = 0; i < end; i++) {
+    const cleaned = stripThinkingFromMessage(history[i]);
+    if (cleaned !== history[i]) {
+      history[i] = cleaned;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function isThinkingSignatureError(err) {
+  if (!err || err.status !== 400) return false;
+  const msg = String(err.message || '');
+  return /\b(?:thinking|redacted_thinking)\b/i.test(msg)
+    && /(?:signature|bound to a different conversation|invalid\b.*\bthinking)/i.test(msg);
+}
+
 /**
  * provider      from providers.js
  * config        { model, effort, monthlyCapUsd }
@@ -81,6 +120,8 @@ function explainError(e) {
 async function runTurn({ provider, config, system, tools, conversation, text, emit, ledger, user, signal, maxSteps = MAX_STEPS }) {
   const history = conversation.history;
   const startLen = history.length;
+  // Prior completed turns must not resend signed thinking blocks from earlier conversations/system prefixes.
+  stripThinkingFromHistory(history, startLen);
   const turn = { answer: '', steps: [], proposals: [], sources: [], searches: 0, cost: 0, calls: 0, inputTokens: 0, outputTokens: 0 };
   const seenSearches = new Set();
   const paid = provider.name === 'anthropic';   // the test provider's spending is not tracked here
@@ -91,7 +132,23 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
       if (conversation.lastInputTokens > provider.maxContextTokens) throw new AskError('This conversation has got long. Press “New chat” to start a fresh one.');
       if (paid && ledger.monthSpend() >= config.monthlyCapUsd) throw new AskError(`This month's AI spending cap ($${config.monthlyCapUsd}) has been reached. Raise it in the settings above, or wait for next month.`, 402);
 
-      const res = await provider.create({ model: config.model, system, tools: tools.definitions, messages: history, effort: config.effort, signal });
+      let streamedAny = false;
+      const onText = (delta) => {
+        if (!delta) return;
+        streamedAny = true;
+        emit({ type: 'text-delta', text: delta });
+      };
+      let res;
+      try {
+        res = await provider.create({ model: config.model, system, tools: tools.definitions, messages: history, effort: config.effort, signal, onText });
+      } catch (err) {
+        if (isThinkingSignatureError(err) && stripThinkingFromHistory(history, history.length)) {
+          if (streamedAny) { streamedAny = false; emit({ type: 'text-reset' }); }
+          res = await provider.create({ model: config.model, system, tools: tools.definitions, messages: history, effort: config.effort, signal, onText });
+        } else {
+          throw err;
+        }
+      }
 
       const u = res.usage || {};
       const cost = paid ? costOf(res.model || config.model, u) : 0;
@@ -120,8 +177,12 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
       for (const b of content) if (b.type === 'text' && Array.isArray(b.citations)) for (const c of b.citations) addSource(turn.sources, c.url, c.title);
 
       const calls = content.filter((b) => b.type === 'tool_use');
-      if (res.stop_reason === 'pause_turn') continue;
+      if (res.stop_reason === 'pause_turn') {
+        if (streamedAny) emit({ type: 'text-reset' });
+        continue;
+      }
       if (res.stop_reason === 'tool_use' && calls.length) {
+        if (streamedAny) emit({ type: 'text-reset' });
         const results = [];
         for (const call of calls) {
           if (signal && signal.aborted) throw new AskError('Stopped.');
@@ -129,7 +190,7 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
           emit({ type: 'step', id: call.id, label: tools.running(call.name, call.input) });
           let body, label, proposal, isError = false;
           try {
-            const r = tools.run(call.name, call.input, { compact: !!provider.compact });
+            const r = tools.run(call.name, call.input, { compact: !!provider.compact, owner: user || 'local' });
             body = JSON.stringify(r.data); label = r.label; proposal = r.proposal;
             if (body.length > provider.maxToolChars) {
               body = JSON.stringify({ error: `That result was too large (${body.length} characters). Ask for fewer schools or fields, or add a filter.` });
@@ -153,6 +214,8 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
         + (res.stop_reason === 'max_tokens' ? '\n\n(The answer was cut off because it got too long. Ask for fewer schools or one field at a time.)' : '');
       if (turn.sources.length) emit({ type: 'sources', sources: turn.sources });
       emit({ type: 'answer', text: turn.answer });
+      // Once the turn finishes, drop thinking/redacted_thinking signatures so follow-up turns or saved threads stay portable.
+      stripThinkingFromHistory(history, history.length);
       return turn;
     }
     throw new AskError('That needed more steps than I allow for one question. Try a narrower question.');
@@ -163,4 +226,12 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
   }
 }
 
-module.exports = { runTurn, AskError, explainError, MAX_STEPS };
+module.exports = {
+  runTurn,
+  AskError,
+  explainError,
+  MAX_STEPS,
+  stripThinkingFromMessage,
+  stripThinkingFromHistory,
+  isThinkingSignatureError,
+};

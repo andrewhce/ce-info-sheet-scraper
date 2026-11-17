@@ -190,7 +190,7 @@ async function crawlSite(startUrl, fetcher, cfg, emit = () => {}) {
         .filter((l) => !tried.has(l.url))
         .map((l) => ({ l, s: scoreLink(l, t, ctx) }))
         .filter((x) => x.s >= 2)
-        .sort((a, b) => b.s - a.s || a.l.url.length - b.l.url.length)
+        .sort((a, b) => b.s - a.s || a.l.url.length - b.l.url.length || (a.l.url < b.l.url ? -1 : a.l.url > b.l.url ? 1 : 0))
         .slice(0, room);
       for (const { l } of ranked) {
         const hit = picks.find((p) => p.url === l.url);
@@ -199,17 +199,31 @@ async function crawlSite(startUrl, fetcher, cfg, emit = () => {}) {
       }
     }
     let added = 0;
-    for (const p of picks) {
-      if (pages.size >= maxPages) break;
-      if (tried.has(p.url)) continue;
-      tried.add(p.url);
-      const page = await fetcher.get(p.url);
-      if (!page.ok) { skipped.push({ url: p.url, reason: page.error || 'failed' }); continue; }
-      let fu; try { fu = new URL(page.finalUrl); } catch { continue; }
-      // a PDF linked from the school's site may be stored on its file host; that is still the school's document
-      if (page.kind === 'pdf') { page.topics = ['pdf', ...p.topics]; if (!pages.has(page.finalUrl)) pages.set(page.finalUrl, page); continue; }
-      if (!sameSite(fu)) { skipped.push({ url: p.url, reason: 'redirects to another site' }); continue; }
-      if (addPage(page, p.topics)) added++;
+    // Pages are downloaded a few at a time, but they are always RECORDED in the order they were picked
+    // (never in the order they happen to finish). Otherwise the same website could give a different page
+    // order on every check, and a question answered on two pages would flip between them.
+    while (picks.length && pages.size < maxPages) {
+      const wave = picks.splice(0, maxPages - pages.size).filter((p) => !tried.has(p.url));
+      for (const p of wave) tried.add(p.url);
+      const got = new Array(wave.length);
+      let next = 0;
+      const runPick = async () => {
+        for (;;) {
+          const i = next++;
+          if (i >= wave.length) return;
+          got[i] = await fetcher.get(wave[i].url);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, wave.length) }, runPick));
+      for (let i = 0; i < wave.length; i++) {
+        const p = wave[i], page = got[i];
+        if (!page.ok) { skipped.push({ url: p.url, reason: page.error || 'failed' }); continue; }
+        let fu; try { fu = new URL(page.finalUrl); } catch { continue; }
+        // a PDF linked from the school's site may be stored on its file host; that is still the school's document
+        if (page.kind === 'pdf') { page.topics = ['pdf', ...p.topics]; if (!pages.has(page.finalUrl)) pages.set(page.finalUrl, page); continue; }
+        if (!sameSite(fu)) { skipped.push({ url: p.url, reason: 'redirects to another site' }); continue; }
+        if (addPage(page, p.topics)) added++;
+      }
     }
     return added;
   };
@@ -224,8 +238,8 @@ async function crawlSite(startUrl, fetcher, cfg, emit = () => {}) {
       const children = locs.filter((l) => /\.xml($|\?)/i.test(l)).slice(0, 3);
       if (children.length) {
         locs = locs.filter((l) => !/\.xml($|\?)/i.test(l));
-        for (const c of children) {
-          const t = await fetcher.getText(c);
+        const childTexts = await Promise.all(children.map((c) => fetcher.getText(c)));
+        for (const t of childTexts) {
           if (t) locs.push(...[...t.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1].replace(/&amp;/g, '&')));
         }
       }
@@ -255,10 +269,14 @@ async function crawlSite(startUrl, fetcher, cfg, emit = () => {}) {
       return { l, s };
     })
     .filter((x) => x.s >= 2).sort((a, b) => b.s - a.s).slice(0, maxPdfs);
-  for (const { l } of pdfs) {
-    if (tried.has(l.url)) continue;
+  const pdfGot = await Promise.all(pdfs.map(async ({ l }) => {
+    if (tried.has(l.url)) return null;
     tried.add(l.url);
-    const page = await fetcher.get(l.url);
+    return { l, page: await fetcher.get(l.url) };
+  }));
+  for (const g of pdfGot) {                       // recorded in the order picked, not the order downloaded
+    if (!g) continue;
+    const { l, page } = g;
     if (!page.ok) { skipped.push({ url: l.url, reason: page.error || 'failed' }); continue; }
     page.topics = ['pdf', ...TOPICS.filter((t) => t.text.test(l.text) || t.path.test(l.url.replace(/[-_]/g, ' '))).map((t) => t.key)];
     page.linkText = l.text;

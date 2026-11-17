@@ -47,13 +47,13 @@ function checkSetup() {
 
   // 1. Node.js
   const major = Number(process.versions.node.split('.')[0]);
-  add('node', major >= 18 ? 'ok' : 'todo', 'Node.js is installed', major >= 18 ? `Version ${process.versions.node}.` : `Version ${process.versions.node} is too old.`,
-    major >= 18 ? null : 'Install the current LTS version from nodejs.org, then open the dashboard again.');
+  add('node', major >= 18 ? 'ok' : 'todo', 'App runtime is ready', major >= 18 ? `Running smoothly (version ${process.versions.node}).` : `Runtime version ${process.versions.node} needs an update.`,
+    major >= 18 ? null : 'Install the latest LTS version from nodejs.org, then open the dashboard again.');
 
   // 2. Libraries
   const missing = ['cheerio', 'exceljs', 'pdf-parse'].filter((m) => { try { require.resolve(m); return false; } catch { return true; } });
-  add('libs', missing.length ? 'todo' : 'ok', 'Program libraries are installed', missing.length ? `Missing: ${missing.join(', ')}.` : 'All three are installed.',
-    missing.length ? 'Double-click Start Dashboard.cmd (it installs them), or run: npm install' : null);
+  add('libs', missing.length ? 'todo' : 'ok', 'Required helper tools are installed', missing.length ? `Missing helper packages.` : 'Ready to read Excel sheets, web pages and PDFs.',
+    missing.length ? 'Double-click Start Dashboard.cmd while connected to the internet to finish installing.' : null);
 
   // 3. Workbook
   const list = readJson(PATHS.schools), template = readJson(PATHS.template);
@@ -81,27 +81,49 @@ function checkSetup() {
   const total = list ? list.schools.length : 0;
   const running = runningScrape();
   if (running) add('scrape', 'info', 'A scrape is running now', `${running.label}: ${running.done || 0} of ${running.schools} schools done.`, 'Leave this window open. You can follow it on the Run scraper page.');
-  else if (scraped) add('scrape', 'ok', 'Schools have been scraped', `${scraped} of ${total || '?'} schools read${bad ? `, ${bad} could not be read` : ''}.`, scraped < total ? 'Run scraper, "Not scraped yet", reads the rest.' : null);
-  else add('scrape', list ? 'todo' : 'info', 'Scrape some schools', list ? 'None of the schools have been scraped yet.' : 'Load your sheet first.', list ? 'On the Run scraper page press Tier 1 (about an hour for 65 schools).' : null);
+  else if (scraped) add('scrape', 'ok', 'Schools have been scraped', `${scraped} of ${total || '?'} schools read${bad ? `, ${bad} could not be read` : ''}.`, scraped < total ? 'On Run scraper choose "Not checked yet", then press Start scraping to read the rest.' : null);
+  else add('scrape', list ? 'todo' : 'info', 'Scrape some schools', list ? 'None of the schools have been scraped yet.' : 'Load your sheet first.', list ? 'On the Run scraper page choose Tier 1, then press Start scraping.' : null);
 
   // 5. Google Sheet export (optional). The file route needs nothing saved on this computer; the web app route saves an address.
-  const cfgFile = readJson(path.join(PATHS.data, 'export-config.json'));
-  add('google', 'optional', 'Send results to a Google Sheet copy',
-    'Optional. On a school page (or Start here) press "Download file for Google Sheet", then load it from the School Info menu inside your sheet copy.' + (cfgFile && cfgFile.url ? ' A one-click web app address is also saved on this computer.' : ''),
-    'One-time setup of the menu is in docs/GOOGLE-SHEET-EXPORT.md.');
+  // A saved address is not proof of a connection, so this reports what the last call to it actually did.
+  const sheetCfg = require('./lib/sheet-export').publicConfig();
+  const googleBase = 'Optional. You can always download a plain Excel (.xlsx) or CSV spreadsheet with one click. For color-coded updates straight inside Google Sheets, use the setup guide under Advanced below.';
+  if (sheetCfg.health === 'working') {
+    add('google', 'ok', 'Optional: Direct Google Sheet menu', `${googleBase} One-click send works (last checked ${ago(sheetCfg.lastCheckAt)}).`, null);
+  } else if (sheetCfg.health === 'untested') {
+    add('google', 'optional', 'Optional: Direct Google Sheet menu', `${googleBase} A one-click address is saved but has not been tested, so it may not work.`,
+      'In the Advanced panel on this page press "Test the connection".');
+  } else if (sheetCfg.health === 'failing') {
+    const why = /only open to your organization/i.test(sheetCfg.lastError || '')
+      ? 'Google asked this computer to sign in, which it cannot do for a web app that is only open to your organization.'
+      : (sheetCfg.lastError || 'Google did not answer correctly.');
+    add('google', 'optional', 'Optional: Direct Google Sheet menu', `${googleBase} The saved one-click address does NOT work (${ago(sheetCfg.lastCheckAt)}): ${why}`,
+      'Use "Download file for Google Sheet" instead, or press "Remove saved address" in the Advanced panel.');
+  } else {
+    add('google', 'optional', 'Optional: Direct Google Sheet menu', googleBase, null);
+  }
 
   // 5b. The Ask page's AI assistant (optional)
   try {
     const { createSettings } = require('./agent/settings');
     const v = createSettings(path.join(PATHS.data, 'agent-settings.json')).publicView();
-    add('ask', v.configured ? 'ok' : 'optional', 'Ask page: the AI assistant',
-      v.configured ? `Connected (${v.provider === 'groq' ? 'Groq, the test model' : 'Claude'}).` : 'Optional. Ask questions about the school data in plain English. It needs an API key.',
-      v.configured ? null : 'On the Ask page, open "Connect the AI" and paste a key. Details are in docs/ASK.md.');
+    add('ask', v.configured ? 'ok' : 'optional', 'Optional: AI assistant (Ask tab)',
+      v.configured ? `Connected (${v.provider === 'groq' ? 'Groq test model' : 'Claude'}).` : 'Optional. Lets you ask questions in plain English once an admin connects an API key.',
+      null);
   } catch { /* an optional extra must never make the checklist fail */ }
+
+  // 5c. Headless browser renderer (optional)
+  try {
+    const { findBrowser } = require('./lib/browser-fetch');
+    const browser = findBrowser();
+    add('browser', browser ? 'ok' : 'optional', 'Optional: JavaScript page renderer',
+      browser ? `Using ${path.basename(browser)} automatically if a school page needs JavaScript.` : 'Install Chrome or Edge to read JavaScript-heavy school websites automatically.',
+      null);
+  } catch { /* optional */ }
 
   // 6. Saved files
   const mb = folderMb(PATHS.cacheDir);
-  add('cache', 'info', 'Saved web pages', `${mb < 1 ? 'Under 1' : Math.round(mb)} MB in data/cache. They only save time on the next scrape, so the folder is safe to delete.`);
+  add('cache', 'info', 'Saved data & offline web cache', `Saved web pages use ${mb < 1 ? 'under 1' : Math.round(mb)} MB to speed up repeat runs. Your sheet and results are safely stored in ${PATHS.data}.`);
 
   return items;
 }

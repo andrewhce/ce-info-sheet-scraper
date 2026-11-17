@@ -30,5 +30,15 @@ if not exist node_modules (
   )
 )
 
-"%NODE%" src\server.js
-pause
+if "%~1"=="--console" (
+  "%NODE%" src\server.js
+  pause
+  exit /b %errorlevel%
+)
+
+"%NODE%" src\launch.js
+if errorlevel 1 (
+  echo.
+  pause
+  exit /b 1
+)

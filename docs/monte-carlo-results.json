@@ -1,0 +1,1107 @@
+{
+ "meta": {
+  "date": "2026-11-17",
+  "schools": 81,
+  "skippedWrongSite": 1,
+  "values": 484,
+  "runs": 5000,
+  "weightRuns": 1000,
+  "seed": 20261117
+ },
+ "accuracy": {
+  "values": 484,
+  "ready": 271,
+  "wrongReady": {
+   "mean": 33.7596,
+   "p5": 13.950000000000017,
+   "median": 32,
+   "p95": 61
+  },
+  "wrongAll": {
+   "mean": 118.9984,
+   "p5": 71,
+   "median": 116,
+   "p95": 175
+  },
+  "readyAccuracy": {
+   "mean": 0.8754258302583168,
+   "p5": 0.7749077490774907,
+   "median": 0.8819188191881919,
+   "p95": 0.9485239852398532
+  },
+  "perField": [
+   {
+    "field": "tuition",
+    "ready": 59,
+    "wrong": {
+     "mean": 7.1268,
+     "p5": 1,
+     "median": 6,
+     "p95": 17
+    }
+   },
+   {
+    "field": "location",
+    "ready": 44,
+    "wrong": {
+     "mean": 5.55,
+     "p5": 1,
+     "median": 5,
+     "p95": 13
+    }
+   },
+   {
+    "field": "grades",
+    "ready": 42,
+    "wrong": {
+     "mean": 5.2308,
+     "p5": 1,
+     "median": 5,
+     "p95": 12
+    }
+   },
+   {
+    "field": "decisionDate",
+    "ready": 25,
+    "wrong": {
+     "mean": 4.0096,
+     "p5": 0,
+     "median": 3,
+     "p95": 9
+    }
+   },
+   {
+    "field": "facultyDegrees",
+    "ready": 24,
+    "wrong": {
+     "mean": 3.0062,
+     "p5": 0,
+     "median": 3,
+     "p95": 7
+    }
+   },
+   {
+    "field": "applicationOpenDate",
+    "ready": 18,
+    "wrong": {
+     "mean": 2.472,
+     "p5": 0,
+     "median": 2,
+     "p95": 6
+    }
+   },
+   {
+    "field": "classSize",
+    "ready": 25,
+    "wrong": {
+     "mean": 2.3936,
+     "p5": 0,
+     "median": 2,
+     "p95": 6
+    }
+   },
+   {
+    "field": "ratio",
+    "ready": 14,
+    "wrong": {
+     "mean": 1.5514,
+     "p5": 0,
+     "median": 1,
+     "p95": 4
+    }
+   },
+   {
+    "field": "collegeEnrollment",
+    "ready": 12,
+    "wrong": {
+     "mean": 1.249,
+     "p5": 0,
+     "median": 1,
+     "p95": 4
+    }
+   },
+   {
+    "field": "enrollment",
+    "ready": 8,
+    "wrong": {
+     "mean": 1.1702,
+     "p5": 0,
+     "median": 1,
+     "p95": 3
+    }
+   }
+  ],
+  "thresholds": [
+   {
+    "at": 60,
+    "toReview": 52,
+    "remaining": {
+     "mean": 85.10411000000009,
+     "p5": 44.39999999999999,
+     "median": 81.99999999999993,
+     "p95": 135.56
+    }
+   },
+   {
+    "at": 70,
+    "toReview": 93,
+    "remaining": {
+     "mean": 68.95544000000004,
+     "p5": 33.850000000000016,
+     "median": 66.1999999999999,
+     "p95": 113.44999999999985
+    }
+   },
+   {
+    "at": 80,
+    "toReview": 139,
+    "remaining": {
+     "mean": 54.142470000000124,
+     "p5": 24.847500000000025,
+     "median": 51.47499999999995,
+     "p95": 92.34999999999984
+    }
+   },
+   {
+    "at": 88,
+    "toReview": 213,
+    "remaining": {
+     "mean": 38.021539999999916,
+     "p5": 16.550000000000033,
+     "median": 35.849999999999994,
+     "p95": 67.00249999999986
+    }
+   },
+   {
+    "at": 92,
+    "toReview": 309,
+    "remaining": {
+     "mean": 22.67144000000008,
+     "p5": 9.397499999999997,
+     "median": 21.15000000000005,
+     "p95": 41.452499999999944
+    }
+   },
+   {
+    "at": 95,
+    "toReview": 398,
+    "remaining": {
+     "mean": 12.016809999999984,
+     "p5": 5.249999999999989,
+     "median": 11.300000000000026,
+     "p95": 21.350000000000055
+    }
+   },
+   {
+    "at": 98,
+    "toReview": 478,
+    "remaining": {
+     "mean": 6.191600000000018,
+     "p5": 3.649999999999996,
+     "median": 5.999999999999988,
+     "p95": 9.400000000000004
+    }
+   }
+  ]
+ },
+ "scenarios": {
+  "honest": {
+   "values": 484,
+   "ready": 271,
+   "wrongReady": {
+    "mean": 20.2512,
+    "p5": 12,
+    "median": 20,
+    "p95": 30
+   },
+   "wrongAll": {
+    "mean": 92.2336,
+    "p5": 73,
+    "median": 92,
+    "p95": 113
+   },
+   "readyAccuracy": {
+    "mean": 0.9252723247232463,
+    "p5": 0.8892988929889298,
+    "median": 0.9261992619926199,
+    "p95": 0.955719557195572
+   },
+   "perField": [
+    {
+     "field": "tuition",
+     "ready": 59,
+     "wrong": {
+      "mean": 4.1786,
+      "p5": 1,
+      "median": 4,
+      "p95": 8
+     }
+    },
+    {
+     "field": "location",
+     "ready": 44,
+     "wrong": {
+      "mean": 3.3138,
+      "p5": 1,
+      "median": 3,
+      "p95": 7
+     }
+    },
+    {
+     "field": "grades",
+     "ready": 42,
+     "wrong": {
+      "mean": 3.205,
+      "p5": 1,
+      "median": 3,
+      "p95": 7
+     }
+    },
+    {
+     "field": "decisionDate",
+     "ready": 25,
+     "wrong": {
+      "mean": 2.5174,
+      "p5": 0,
+      "median": 2,
+      "p95": 5
+     }
+    },
+    {
+     "field": "facultyDegrees",
+     "ready": 24,
+     "wrong": {
+      "mean": 1.8532,
+      "p5": 0,
+      "median": 2,
+      "p95": 4
+     }
+    },
+    {
+     "field": "applicationOpenDate",
+     "ready": 18,
+     "wrong": {
+      "mean": 1.4946,
+      "p5": 0,
+      "median": 1,
+      "p95": 4
+     }
+    },
+    {
+     "field": "classSize",
+     "ready": 25,
+     "wrong": {
+      "mean": 1.3318,
+      "p5": 0,
+      "median": 1,
+      "p95": 3
+     }
+    },
+    {
+     "field": "ratio",
+     "ready": 14,
+     "wrong": {
+      "mean": 0.9112,
+      "p5": 0,
+      "median": 1,
+      "p95": 3
+     }
+    },
+    {
+     "field": "enrollment",
+     "ready": 8,
+     "wrong": {
+      "mean": 0.7368,
+      "p5": 0,
+      "median": 1,
+      "p95": 2
+     }
+    },
+    {
+     "field": "collegeEnrollment",
+     "ready": 12,
+     "wrong": {
+      "mean": 0.7088,
+      "p5": 0,
+      "median": 1,
+      "p95": 2
+     }
+    }
+   ],
+   "thresholds": [
+    {
+     "at": 60,
+     "toReview": 52,
+     "remaining": {
+      "mean": 59.68565000000021,
+      "p5": 43.5475,
+      "median": 59.574999999999946,
+      "p95": 77.84999999999992
+     }
+    },
+    {
+     "at": 70,
+     "toReview": 93,
+     "remaining": {
+      "mean": 46.39059000000009,
+      "p5": 32.55000000000002,
+      "median": 46.099999999999966,
+      "p95": 62.09999999999991
+     }
+    },
+    {
+     "at": 80,
+     "toReview": 139,
+     "remaining": {
+      "mean": 34.92086,
+      "p5": 23.200000000000035,
+      "median": 34.55000000000001,
+      "p95": 48.24999999999994
+     }
+    },
+    {
+     "at": 88,
+     "toReview": 213,
+     "remaining": {
+      "mean": 23.850319999999968,
+      "p5": 15.000000000000036,
+      "median": 23.550000000000026,
+      "p95": 33.95000000000002
+     }
+    },
+    {
+     "at": 92,
+     "toReview": 309,
+     "remaining": {
+      "mean": 14.177989999999985,
+      "p5": 8.299999999999999,
+      "median": 13.900000000000022,
+      "p95": 21.000000000000032
+     }
+    },
+    {
+     "at": 95,
+     "toReview": 398,
+     "remaining": {
+      "mean": 7.903620000000035,
+      "p5": 4.799999999999992,
+      "median": 7.699999999999991,
+      "p95": 11.85000000000002
+     }
+    },
+    {
+     "at": 98,
+     "toReview": 478,
+     "remaining": {
+      "mean": 4.737649999999986,
+      "p5": 3.6999999999999957,
+      "median": 4.649999999999992,
+      "p95": 6.049999999999991
+     }
+    }
+   ]
+  },
+  "middle": {
+   "values": 484,
+   "ready": 271,
+   "wrongReady": {
+    "mean": 33.7596,
+    "p5": 13.950000000000017,
+    "median": 32,
+    "p95": 61
+   },
+   "wrongAll": {
+    "mean": 118.9984,
+    "p5": 71,
+    "median": 116,
+    "p95": 175
+   },
+   "readyAccuracy": {
+    "mean": 0.8754258302583168,
+    "p5": 0.7749077490774907,
+    "median": 0.8819188191881919,
+    "p95": 0.9485239852398532
+   },
+   "perField": [
+    {
+     "field": "tuition",
+     "ready": 59,
+     "wrong": {
+      "mean": 7.1268,
+      "p5": 1,
+      "median": 6,
+      "p95": 17
+     }
+    },
+    {
+     "field": "location",
+     "ready": 44,
+     "wrong": {
+      "mean": 5.55,
+      "p5": 1,
+      "median": 5,
+      "p95": 13
+     }
+    },
+    {
+     "field": "grades",
+     "ready": 42,
+     "wrong": {
+      "mean": 5.2308,
+      "p5": 1,
+      "median": 5,
+      "p95": 12
+     }
+    },
+    {
+     "field": "decisionDate",
+     "ready": 25,
+     "wrong": {
+      "mean": 4.0096,
+      "p5": 0,
+      "median": 3,
+      "p95": 9
+     }
+    },
+    {
+     "field": "facultyDegrees",
+     "ready": 24,
+     "wrong": {
+      "mean": 3.0062,
+      "p5": 0,
+      "median": 3,
+      "p95": 7
+     }
+    },
+    {
+     "field": "applicationOpenDate",
+     "ready": 18,
+     "wrong": {
+      "mean": 2.472,
+      "p5": 0,
+      "median": 2,
+      "p95": 6
+     }
+    },
+    {
+     "field": "classSize",
+     "ready": 25,
+     "wrong": {
+      "mean": 2.3936,
+      "p5": 0,
+      "median": 2,
+      "p95": 6
+     }
+    },
+    {
+     "field": "ratio",
+     "ready": 14,
+     "wrong": {
+      "mean": 1.5514,
+      "p5": 0,
+      "median": 1,
+      "p95": 4
+     }
+    },
+    {
+     "field": "collegeEnrollment",
+     "ready": 12,
+     "wrong": {
+      "mean": 1.249,
+      "p5": 0,
+      "median": 1,
+      "p95": 4
+     }
+    },
+    {
+     "field": "enrollment",
+     "ready": 8,
+     "wrong": {
+      "mean": 1.1702,
+      "p5": 0,
+      "median": 1,
+      "p95": 3
+     }
+    }
+   ],
+   "thresholds": [
+    {
+     "at": 60,
+     "toReview": 52,
+     "remaining": {
+      "mean": 85.10411000000009,
+      "p5": 44.39999999999999,
+      "median": 81.99999999999993,
+      "p95": 135.56
+     }
+    },
+    {
+     "at": 70,
+     "toReview": 93,
+     "remaining": {
+      "mean": 68.95544000000004,
+      "p5": 33.850000000000016,
+      "median": 66.1999999999999,
+      "p95": 113.44999999999985
+     }
+    },
+    {
+     "at": 80,
+     "toReview": 139,
+     "remaining": {
+      "mean": 54.142470000000124,
+      "p5": 24.847500000000025,
+      "median": 51.47499999999995,
+      "p95": 92.34999999999984
+     }
+    },
+    {
+     "at": 88,
+     "toReview": 213,
+     "remaining": {
+      "mean": 38.021539999999916,
+      "p5": 16.550000000000033,
+      "median": 35.849999999999994,
+      "p95": 67.00249999999986
+     }
+    },
+    {
+     "at": 92,
+     "toReview": 309,
+     "remaining": {
+      "mean": 22.67144000000008,
+      "p5": 9.397499999999997,
+      "median": 21.15000000000005,
+      "p95": 41.452499999999944
+     }
+    },
+    {
+     "at": 95,
+     "toReview": 398,
+     "remaining": {
+      "mean": 12.016809999999984,
+      "p5": 5.249999999999989,
+      "median": 11.300000000000026,
+      "p95": 21.350000000000055
+     }
+    },
+    {
+     "at": 98,
+     "toReview": 478,
+     "remaining": {
+      "mean": 6.191600000000018,
+      "p5": 3.649999999999996,
+      "median": 5.999999999999988,
+      "p95": 9.400000000000004
+     }
+    }
+   ]
+  },
+  "optimistic": {
+   "values": 484,
+   "ready": 271,
+   "wrongReady": {
+    "mean": 73.856,
+    "p5": 34,
+    "median": 71,
+    "p95": 122
+   },
+   "wrongAll": {
+    "mean": 185.8128,
+    "p5": 115,
+    "median": 183,
+    "p95": 264
+   },
+   "readyAccuracy": {
+    "mean": 0.7274686346863493,
+    "p5": 0.5498154981549815,
+    "median": 0.7380073800738007,
+    "p95": 0.8745387453874539
+   },
+   "perField": [
+    {
+     "field": "tuition",
+     "ready": 59,
+     "wrong": {
+      "mean": 15.8714,
+      "p5": 4,
+      "median": 14,
+      "p95": 34
+     }
+    },
+    {
+     "field": "location",
+     "ready": 44,
+     "wrong": {
+      "mean": 12.0696,
+      "p5": 2,
+      "median": 11,
+      "p95": 26
+     }
+    },
+    {
+     "field": "grades",
+     "ready": 42,
+     "wrong": {
+      "mean": 11.459,
+      "p5": 2,
+      "median": 10,
+      "p95": 25
+     }
+    },
+    {
+     "field": "decisionDate",
+     "ready": 25,
+     "wrong": {
+      "mean": 8.0646,
+      "p5": 2,
+      "median": 7,
+      "p95": 17
+     }
+    },
+    {
+     "field": "facultyDegrees",
+     "ready": 24,
+     "wrong": {
+      "mean": 6.3252,
+      "p5": 1,
+      "median": 6,
+      "p95": 14
+     }
+    },
+    {
+     "field": "classSize",
+     "ready": 25,
+     "wrong": {
+      "mean": 5.6972,
+      "p5": 1,
+      "median": 5,
+      "p95": 13
+     }
+    },
+    {
+     "field": "applicationOpenDate",
+     "ready": 18,
+     "wrong": {
+      "mean": 5.2124,
+      "p5": 1,
+      "median": 5,
+      "p95": 11
+     }
+    },
+    {
+     "field": "ratio",
+     "ready": 14,
+     "wrong": {
+      "mean": 3.6268,
+      "p5": 0,
+      "median": 3,
+      "p95": 8
+     }
+    },
+    {
+     "field": "collegeEnrollment",
+     "ready": 12,
+     "wrong": {
+      "mean": 3.0264,
+      "p5": 0,
+      "median": 3,
+      "p95": 7
+     }
+    },
+    {
+     "field": "enrollment",
+     "ready": 8,
+     "wrong": {
+      "mean": 2.5034,
+      "p5": 0,
+      "median": 2,
+      "p95": 6
+     }
+    }
+   ],
+   "thresholds": [
+    {
+     "at": 60,
+     "toReview": 52,
+     "remaining": {
+      "mean": 149.5955700000004,
+      "p5": 83.39749999999995,
+      "median": 146.25,
+      "p95": 224.0575000000002
+     }
+    },
+    {
+     "at": 70,
+     "toReview": 93,
+     "remaining": {
+      "mean": 128.1913100000002,
+      "p5": 68.39749999999991,
+      "median": 125.44999999999982,
+      "p95": 197.2550000000003
+     }
+    },
+    {
+     "at": 80,
+     "toReview": 139,
+     "remaining": {
+      "mean": 106.75893000000009,
+      "p5": 53.99749999999993,
+      "median": 103.77499999999984,
+      "p95": 169.51000000000025
+     }
+    },
+    {
+     "at": 88,
+     "toReview": 213,
+     "remaining": {
+      "mean": 79.45384000000004,
+      "p5": 38.349999999999966,
+      "median": 76.42499999999981,
+      "p95": 129.2049999999998
+     }
+    },
+    {
+     "at": 92,
+     "toReview": 309,
+     "remaining": {
+      "mean": 49.40078000000002,
+      "p5": 22.000000000000046,
+      "median": 47.04999999999991,
+      "p95": 83.4524999999997
+     }
+    },
+    {
+     "at": 95,
+     "toReview": 398,
+     "remaining": {
+      "mean": 25.95402,
+      "p5": 11.950000000000019,
+      "median": 24.525000000000087,
+      "p95": 44.49999999999982
+     }
+    },
+    {
+     "at": 98,
+     "toReview": 478,
+     "remaining": {
+      "mean": 10.124360000000015,
+      "p5": 5.949999999999988,
+      "median": 9.900000000000007,
+      "p95": 15.10000000000008
+     }
+    }
+   ]
+  }
+ },
+ "sampling": {
+  "population": 271,
+  "precision": [
+   {
+    "accuracy": 0.9,
+    "bySize": [
+     {
+      "checks": 20,
+      "within5": 0,
+      "within3": 0,
+      "typicalHalfWidth": 0.13658615621382006
+     },
+     {
+      "checks": 30,
+      "within5": 0,
+      "within3": 0,
+      "typicalHalfWidth": 0.11080757659647501
+     },
+     {
+      "checks": 50,
+      "within5": 0.005666666666666667,
+      "within3": 0,
+      "typicalHalfWidth": 0.0850648896781564
+     },
+     {
+      "checks": 75,
+      "within5": 0.051333333333333335,
+      "within3": 0.001,
+      "typicalHalfWidth": 0.06720044933896654
+     },
+     {
+      "checks": 100,
+      "within5": 0.123,
+      "within3": 0.0003333333333333333,
+      "typicalHalfWidth": 0.05956938137726464
+     },
+     {
+      "checks": 150,
+      "within5": 0.675,
+      "within3": 0.0023333333333333335,
+      "typicalHalfWidth": 0.048447618822314256
+     },
+     {
+      "checks": 200,
+      "within5": 0.9923333333333333,
+      "within3": 0.004,
+      "typicalHalfWidth": 0.04186846119575715
+     },
+     {
+      "checks": 271,
+      "within5": 1,
+      "within3": 0.018333333333333333,
+      "typicalHalfWidth": 0.03584918974586961
+     }
+    ]
+   },
+   {
+    "accuracy": 0.95,
+    "bySize": [
+     {
+      "checks": 20,
+      "within5": 0,
+      "within3": 0,
+      "typicalHalfWidth": 0.11362733703984686
+     },
+     {
+      "checks": 30,
+      "within5": 0,
+      "within3": 0,
+      "typicalHalfWidth": 0.08039953798736568
+     },
+     {
+      "checks": 50,
+      "within5": 0.07833333333333334,
+      "within3": 0,
+      "typicalHalfWidth": 0.06178236305936005
+     },
+     {
+      "checks": 75,
+      "within5": 0.47433333333333333,
+      "within3": 0.019666666666666666,
+      "typicalHalfWidth": 0.054164321544056246
+     },
+     {
+      "checks": 100,
+      "within5": 0.7686666666666667,
+      "within3": 0.042666666666666665,
+      "typicalHalfWidth": 0.04510430190788732
+     },
+     {
+      "checks": 150,
+      "within5": 0.999,
+      "within3": 0.11733333333333333,
+      "typicalHalfWidth": 0.035200657510847944
+     },
+     {
+      "checks": 200,
+      "within5": 1,
+      "within3": 0.466,
+      "typicalHalfWidth": 0.03109835363459944
+     },
+     {
+      "checks": 271,
+      "within5": 1,
+      "within3": 0.8586666666666667,
+      "typicalHalfWidth": 0.02604348855979282
+     }
+    ]
+   },
+   {
+    "accuracy": 0.98,
+    "bySize": [
+     {
+      "checks": 20,
+      "within5": 0,
+      "within3": 0,
+      "typicalHalfWidth": 0.08056506274746661
+     },
+     {
+      "checks": 30,
+      "within5": 0,
+      "within3": 0,
+      "typicalHalfWidth": 0.056758545695239006
+     },
+     {
+      "checks": 50,
+      "within5": 0.372,
+      "within3": 0,
+      "typicalHalfWidth": 0.05070884831469654
+     },
+     {
+      "checks": 75,
+      "within5": 0.944,
+      "within3": 0.21633333333333332,
+      "typicalHalfWidth": 0.034688941907150425
+     },
+     {
+      "checks": 100,
+      "within5": 0.9983333333333333,
+      "within3": 0.41833333333333333,
+      "typicalHalfWidth": 0.03225565535351275
+     },
+     {
+      "checks": 150,
+      "within5": 1,
+      "within3": 0.8213333333333334,
+      "typicalHalfWidth": 0.025161519074296677
+     },
+     {
+      "checks": 200,
+      "within5": 1,
+      "within3": 0.989,
+      "typicalHalfWidth": 0.02124178266439985
+     },
+     {
+      "checks": 271,
+      "within5": 1,
+      "within3": 1,
+      "typicalHalfWidth": 0.017275243292724837
+     }
+    ]
+   }
+  ],
+  "separation": {
+   "safe": 0.95,
+   "check": 0.6,
+   "bySize": [
+    {
+     "checks": 20,
+     "chance": 0.4523333333333333
+    },
+    {
+     "checks": 30,
+     "chance": 0.7486666666666667
+    },
+    {
+     "checks": 50,
+     "chance": 0.9563333333333334
+    },
+    {
+     "checks": 75,
+     "chance": 0.9963333333333333
+    },
+    {
+     "checks": 100,
+     "chance": 1
+    },
+    {
+     "checks": 150,
+     "chance": 1
+    },
+    {
+     "checks": 200,
+     "chance": 1
+    },
+    {
+     "checks": 271,
+     "chance": 1
+    }
+   ]
+  }
+ },
+ "weights": {
+  "shakyScores": [
+   88,
+   90
+  ],
+  "readyNow": 271,
+  "readyWhenVaried": {
+   "mean": 263.597,
+   "p5": 197.95,
+   "median": 266,
+   "p95": 320
+  },
+  "stable": 87,
+  "mostlyStable": 91,
+  "shaky": 93,
+  "perField": [
+   {
+    "field": "decisionDate",
+    "ready": 25,
+    "stable": 0
+   },
+   {
+    "field": "enrollment",
+    "ready": 8,
+    "stable": 0
+   },
+   {
+    "field": "tuition",
+    "ready": 59,
+    "stable": 12
+   },
+   {
+    "field": "location",
+    "ready": 44,
+    "stable": 11
+   },
+   {
+    "field": "applicationOpenDate",
+    "ready": 18,
+    "stable": 6
+   },
+   {
+    "field": "ratio",
+    "ready": 14,
+    "stable": 5
+   },
+   {
+    "field": "grades",
+    "ready": 42,
+    "stable": 17
+   },
+   {
+    "field": "facultyDegrees",
+    "ready": 24,
+    "stable": 11
+   },
+   {
+    "field": "classSize",
+    "ready": 25,
+    "stable": 16
+   },
+   {
+    "field": "collegeEnrollment",
+    "ready": 12,
+    "stable": 9
+   }
+  ],
+  "oneAtATime": [
+   {
+    "weight": "dedicated",
+    "lower": 233,
+    "higher": 284,
+    "swing": 51
+   },
+   {
+    "weight": "related",
+    "lower": 256,
+    "higher": 291,
+    "swing": 35
+   },
+   {
+    "weight": "dateYearOk",
+    "lower": 244,
+    "higher": 277,
+    "swing": 33
+   },
+   {
+    "weight": "quoteShows",
+    "lower": 256,
+    "higher": 286,
+    "swing": 30
+   },
+   {
+    "weight": "official",
+    "lower": 260,
+    "higher": 280,
+    "swing": 20
+   },
+   {
+    "weight": "campusGuess",
+    "lower": 286,
+    "higher": 271,
+    "swing": 15
+   }
+  ],
+  "weightSd": 0.35,
+  "baselineSd": 0.4
+ }
+}

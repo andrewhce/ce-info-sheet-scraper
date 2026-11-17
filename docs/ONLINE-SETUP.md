@@ -1,5 +1,9 @@
 # Put the program online for the team
 
+> **Using Railway? Follow [RAILWAY-STEP-BY-STEP.md](RAILWAY-STEP-BY-STEP.md)**, a shorter click-by-click version with the exact order to do things in. This page is the longer reference.
+
+> Want to host on a **DigitalOcean Droplet** with Docker + automatic HTTPS instead? Follow [DIGITALOCEAN-SETUP.md](DIGITALOCEAN-SETUP.md) and [`deploy/digitalocean/`](../deploy/digitalocean/).
+>
 > This needs a hosting service (a computer that is always on). If you do not have one, use [TEAM-SETUP.md](TEAM-SETUP.md) instead: a folder teammates unzip and double-click, with
 > no server and no installing.
 
@@ -41,7 +45,8 @@ git remote add origin https://github.com/YOUR-NAME/school-info-sheet.git
 git push -u origin main
 ```
 
-Check nothing private went up: `git ls-files | findstr /i "data/ workbook .env"` must print nothing.
+Check nothing private went up. In PowerShell this must print nothing: `git ls-files | Select-String -Pattern '^data/|\.xlsx$|^\.env|^dist/|node_modules/'`.
+(If the folder is already a Git repository connected to GitHub, skip `git init` and `git remote add`: just `git add -A`, `git commit` and `git push`.)
 
 ## Step 2. Create the service (Railway)
 
@@ -58,7 +63,7 @@ Check nothing private went up: `git ls-files | findstr /i "data/ workbook .env"`
 | `GOOGLE_CLIENT_SECRET` | from step 3 |
 
 Optional: `ALLOWED_EMAILS` (extra single addresses, comma separated; leave `ALLOWED_EMAIL_DOMAIN` empty to allow only these people),
-`CRAWL_PARALLEL_SITES` (how many websites are read at once; the container default is 4), `SESSION_SECRET` (32 or more random
+`CRAWL_PARALLEL_SITES` (how many websites are read at once; the container default is 8), `SESSION_SECRET` (32 or more random
 characters; if you skip it, one is made and kept on the volume). `HOST`, `PORT` and `DATA_DIR` are already set by the `Dockerfile`.
 
 The **Ask** page (AI assistant) is switched on by environment variables too, and cannot be changed from the page on a server:
@@ -92,7 +97,7 @@ Open the address. It sends you to Google, then back to the dashboard. On **Start
 
 - **Who did what.** The service's logs record who loaded a sheet, started or stopped a scrape and exported a school. The export line on each school page
   shows who sent it.
-- **Updates.** Pushing a change to GitHub redeploys the service. A redeploy stops any scrape in progress; start "Not scraped yet" again and it carries on.
+- **Updates.** Pushing a change to GitHub redeploys the service. A redeploy stops any scrape in progress; choose "Not checked yet" and press Start scraping again and it carries on.
 - **Sign-in lasts 12 hours**, then Google asks again. Signing out is the link at the top right.
 - **Backups.** The volume holds everything. The scrape results can be re-made by scraping again, and the sheet can be loaded again, so the only thing worth
   keeping safe is access to your Google settings.

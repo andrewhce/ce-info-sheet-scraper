@@ -1,0 +1,69 @@
+# DigitalOcean Droplet production stack: School Info Sheet + Caddy auto-HTTPS
+# Usage (from deploy/digitalocean after creating .env from env.example):
+#   docker compose up -d --build
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        INSTALL_CHROMIUM: ${INSTALL_CHROMIUM:-1}
+    restart: unless-stopped
+    init: true
+    shm_size: "256m"
+    expose:
+      - "8080"
+    volumes:
+      - school_data:/data
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      DATA_DIR: "/data"
+      TZ: "${TZ:-America/Los_Angeles}"
+      PUBLIC_URL: "https://${APP_DOMAIN:?Set APP_DOMAIN in .env}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID in .env}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET in .env}"
+      ALLOWED_EMAIL_DOMAIN: "${ALLOWED_EMAIL_DOMAIN:-}"
+      ALLOWED_EMAILS: "${ALLOWED_EMAILS:-}"
+      SESSION_SECRET: "${SESSION_SECRET:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      ASK_PROVIDER: "${ASK_PROVIDER:-anthropic}"
+      ASK_MONTHLY_CAP_USD: "${ASK_MONTHLY_CAP_USD:-5}"
+      ASK_WEB_SEARCH: "${ASK_WEB_SEARCH:-1}"
+      CRAWL_PARALLEL_SITES: "${CRAWL_PARALLEL_SITES:-8}"
+      HEADLESS_NO_SANDBOX: "1"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: "${APP_DOMAIN:?Set APP_DOMAIN in .env}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  school_data:
+  caddy_data:
+  caddy_config:

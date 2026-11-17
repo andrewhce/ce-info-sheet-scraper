@@ -8,7 +8,7 @@
     "check": "node src/setup-check.js",
     "import": "node src/import-workbook.js",
     "scrape": "node src/scrape.js",
-    "test": "node tests/xlsx-lean.test.js && node tests/results-package.test.js && node tests/auth.test.js && node tests/rules.test.js && node tests/agent.test.js && node tests/apps-script.test.js && node tests/publish-copy.test.js",
+    "test": "node tests/xlsx-lean.test.js && node tests/results-package.test.js && node tests/auth.test.js && node tests/rules.test.js && node tests/agent.test.js && node tests/apps-script.test.js && node tests/publish-copy.test.js && node tests/usability.test.js && node tests/scheduler-slack.test.js && node tests/security.test.js && node tests/verification.test.js && node tests/trust.test.js && node tests/monte-carlo.test.js",
     "build-copy": "node deploy/build-static.js",
     "deploy-copy": "node deploy/deploy-copy.js",
     "publish-copy": "node deploy/publish-copy.js",

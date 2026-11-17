@@ -24,6 +24,8 @@ const GRADE_RES = [
   new RegExp(`\\b(pre-?k(?:indergarten)?|pk|tk|jk|k(?:indergarten)?)${SEP}(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'gi'),
   new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?${SEP}(\\d{1,2})(?:st|nd|rd|th)?\\s+grades?\\b`, 'gi'),
 ];
+// "Grade 6 through Grade 8", "Kindergarten through Grade 5": only used to read campus labels next to addresses
+const THROUGH_RE = new RegExp(`\\b(?:grades?\\s*)?(${GT})\\s*(?:through|thru|to)\\s*grades?\\s*(${GT})\\b`, 'gi');
 function gradeNum(g) {
   g = String(g).toLowerCase();
   if (/^(pk|pre-?k|pre-?kindergarten|jk)$/.test(g)) return -1;
@@ -280,14 +282,47 @@ function rLocation(c) {
       }
     }
   }
+  // The campus label is usually in a different block from the address ("Short Hills Campus: Grades K-5", "Grade 6 through Grade 8 in Basking Ridge"),
+  // so a short line that names ONE of the address towns and a division or grade range tells which campus this division uses.
+  // (Only towns that belong to ONE address count: campuses in the same town cannot be told apart by town.)
+  const cityLabel = new Map();
+  if (c.school.division) {
+    const streetsIn = new Map();   // town -> the different street addresses listed in it (the same address found twice is still one)
+    for (const t of tally.values()) {
+      const parts = t.value.split(',');
+      const city = (parts[1] || '').trim();
+      if (city) streetsIn.set(city, (streetsIn.get(city) || new Set()).add(oneLine(parts[0]).toLowerCase()));
+    }
+    const cities = [...streetsIn].filter(([, streets]) => streets.size === 1).map(([city]) => city);
+    const hasCity = (text, city) => new RegExp('\\b' + city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(text);
+    const [lo, hi] = BANDS[c.school.division];
+    const fitsDivision = (text) => {
+      if (DIV_WORDS[c.school.division].test(text)) return true;
+      const spans = gradeSpans(text);
+      THROUGH_RE.lastIndex = 0;
+      let m;
+      while ((m = THROUGH_RE.exec(text))) { const a = gradeNum(m[1]), b = gradeNum(m[2]); if (a != null && b != null && b > a) spans.push({ min: a, max: b }); }
+      // a campus labelled "Grades 6-12" serves the middle and the upper school, one labelled "K-5" serves the lower school.
+      // A line that spans more than the division only counts when it is about a campus ("a K-12 school in Oakland" is the whole school, not a campus).
+      return spans.some((s) => (s.min >= lo && s.max <= hi) || (s.min <= lo && s.max >= hi && /\bcampus\b/i.test(text)));
+    };
+    for (const page of c.pages) for (const b of page.blocks || []) {
+      const text = oneLine(b.text);
+      if (text.length > 110) continue;
+      const named = cities.filter((city) => hasCity(text, city));
+      if (named.length === 1 && !cityLabel.has(named[0].toLowerCase()) && fitsDivision(text)) cityLabel.set(named[0].toLowerCase(), text);
+    }
+  }
   const region = (c.school.region || '').toLowerCase();
   const many = [...tally.values()].filter((t) => t.n >= 3 || t.conf === 'high').length > 1; // several real campus addresses
   const out = [...tally.values()].map((t) => {
     const city = (t.value.split(',')[1] || '').trim().toLowerCase();
-    const bonus = (city && region.includes(city) ? 3 : 0) + (t.fit > 0 ? 6 : 0);
+    const labelled = cityLabel.get(city);
+    const bonus = (city && region.includes(city) ? 3 : 0) + (t.fit > 0 || labelled ? 6 : 0);
     const notes = [];
     if (t.n > 1) notes.push(`seen on ${t.n} pages`);
-    if (many && c.school.division && !(t.fit > 0)) notes.push('the site lists more than one address; check which campus this division uses');
+    if (labelled) notes.push(`the site labels this campus for this division: “${clip(labelled, 90)}”`);
+    if (many && c.school.division && !(t.fit > 0) && !labelled) notes.push('the site lists more than one address; check which campus this division uses');
     return mk(t.value, t.item, Math.min(t.pts, 8) + bonus, t.conf === 'high' || t.n >= 3 ? 'high' : 'medium', notes.length ? { note: notes.join('; ') } : null);
   });
   return best(out);
@@ -350,15 +385,26 @@ function rEnrollment(c) {
       // "62 Class of 2026 students recognized as National Merit Finalists": a graduating year, not a headcount
       if (!numStr.includes(',') && n >= 1990 && n <= 2040 && /(?:class(?:es)? of|\bof|\bin|\bsince|\bby|\bfor|\bfall|\bspring)\s*$/i.test(gap)) return;
       if (/\b(?:deposit|fees?|tuition|cost|costs|due|deadline|dates?|level|levels|options?|agreement|contract|forms?|process|period|policy|capacity|limit|re-?)\b[^\d]{0,25}$/i.test(gap) && /enroll/i.test(gap)) return;
+      // "Director of Enrollment Management and Access (650) 851-6158": an area code or part of a phone number
+      if ((/\(\s*$/.test(gap) && /^\s*\)\s*\d{3}/.test(after)) || /^[-.\s]\d{3,4}[-.]\d{3,4}\b/.test(after) || (/\d[-.]\s*$/.test(gap) && /^[-.]\d/.test(after))) return;
+      // "Class of 2026 enrollment 113": one graduating class, not the whole school
+      if (/\bclass(?:es)? of\s+(?:19|20)\d{2}\b[^\d]{0,20}$/i.test(gap)) return;
+      // "Total Exams: 2,564 Total Students: 947": a number that follows its own label belongs to that label, not to the words after it
+      if (/[A-Za-z)]\s*:\s*$/.test(gap) && !/\b(?:enrollment|enrolled|students)\s*:\s*$/i.test(gap)) return;
     }
     const fit = divisionFit(it.text, div);
     if (fit < 0) return; // a number stated for another division is not this school's number
     let score = base + w + fit * 2;
+    // "57 Boarding Students": only part of the school, so a total elsewhere should win
+    const partial = at >= 0 && /^\+?\s*(?:day|boarding)\s+students?\b/i.test(text.slice(at + numStr.length, at + numStr.length + 24));
+    if (partial) score -= 2.5;
     if (!div && /\btotal\b|\bK-12\b|school-?wide|\ball\b/i.test(it.text)) score += 1.5;
     if (!div && Object.values(DIV_WORDS).some((re) => re.test(it.text))) score -= 1.5;
     const q = at >= 0 ? qualifierBefore(text, at) : '';
     out.push(mk(q ? `${q} ${numStr}` : numStr, it, score, base >= 4 ? 'high' : 'medium', {
-      num: n, key: numStr, note: div && fit === 0 ? 'The page does not say which division this number covers. It may be the whole school.' : undefined,
+      num: n, key: numStr,
+      note: partial ? 'This counts only the day or only the boarding students, so the whole school is probably larger.'
+        : div && fit === 0 ? 'The page does not say which division this number covers. It may be the whole school.' : undefined,
     }));
   };
   // "108 students" on its own proves nothing (it could be a class, a club, a test sitting).
@@ -368,12 +414,15 @@ function rEnrollment(c) {
   const E1 = /(?<!\bre-?)\b(?:total\s+|student\s+|current\s+|school\s+|overall\s+)*enrollment\b[^\d]{0,25}?([\d,]{2,6})\b/i;
   const E2 = new RegExp(`(?:^|[^\\d$,.:\\u2013-])([\\d,]{2,6})\\+?\\s+${KIND}${NOT_ENROLL}`, 'i');
   const E2_TILE = new RegExp(`^([\\d,]{2,6})\\+?\\s+${KIND}${NOT_ENROLL}`, 'i');
+  // "Total Students: 947" (label first, number after)
+  const E4 = /\btotal\s+(?:number of\s+)?students(?:\s+enrolled)?\s*[:=|]?\s*([\d,]{2,6})\b(?!\s*%)/i;
   const E3 = /\b(?:enroll(?:s|ing|ment of)?|educat(?:es|ing)|serv(?:es|ing)|home to|community of|student body of|student population of)\s+(?:approximately |about |nearly |over |more than |roughly |some )?([\d,]{2,6})\s+(?:[a-z-]+\s){0,3}students\b/i;
   for (const it of c.idx.phrases) {
     const w = weightOf(it.page, W.facts);
     if (!w) continue;
     let m;
     if ((m = E1.exec(it.text))) push(m[1], it, 5, w, it.text, m.index + m[0].length);
+    else if ((m = E4.exec(it.text))) push(m[1], it, 3.5, w, it.text, m.index + m[0].length);   // below a stat tile: a boarding house page also says "Total students: 45"
     else if ((it.form === 'A' || it.form === 'C') && (m = E2_TILE.exec(`${it.num} ${it.after}`))) push(m[1], it, 4, w, it.text, 0);
     else if (it.form === 'S' && ((it.page.kind !== 'pdf' && it.text.length <= 70) || /enroll|student body|total/i.test(it.text)) && (m = E2.exec(it.text))) push(m[1], it, 4, w, it.text, m.index + m[0].length);
   }
@@ -426,12 +475,14 @@ function rRatio(c) {
   const out = [];
   for (const it of [...c.idx.phrases, ...c.idx.sentences]) {
     const w = weightOf(it.page, { ...W.facts, academics: 1.5 });
-    if (!w || !/ratio/i.test(it.text) || !/student|teacher|faculty/i.test(it.text) || /counsel/i.test(it.text)) continue;
+    if (!w || !/\bratios?\b/i.test(it.text) || !/student|teacher|faculty/i.test(it.text) || /counsel/i.test(it.text)) continue;
     // a ratio for a paid or add-on service ("Guided Study Hall | $5,300 | 4:1 student to faculty ratio of academic support") is not the school's
     if (/\$\s*\d|\b(?:fees?|costs?|tuition|price|study hall|tutor(?:ing)?|academic support|summer|camps?|after-?school|add-on|private lessons?|clinic)\b/i.test(it.text)) continue;
     const m = R.exec(it.text);
     if (!m) continue;
     const a = Number(m[1]), b = Number(m[2]);
+    // "10:00 AM" is a time of day, and a ratio needs both sides to be real numbers
+    if (Math.min(a, b) < 1 || /^\s*(?:[ap]\.?m\b|o'clock)/i.test(it.text.slice(m.index + m[0].length)) || /^\d{1,2}:\d{2}$/.test(m[0]) && m[2].length === 2 && m[2][0] === '0') continue;
     if (Math.min(a, b) !== 1 && !(Math.max(a, b) <= 25)) continue;
     if (Math.max(a, b) > 30 || Math.max(a, b) < 2) continue;
     const fit = divisionFit(it.text, c.school.division);
@@ -449,6 +500,14 @@ function rCounselors(c) {
     return mk(String(n), it, 5 + w, 'high', { num: n });
   });
   if (out.length) return best(out);
+  // "Our five counselors ...", "a team of six counselors", "a 5-person college counseling team", written on the college counseling pages themselves
+  const R2 = new RegExp(`\\b(?:(?:our|the|its|with)\\s+|team of\\s+|staff of\\s+)(\\d{1,2}|${WORDNUM_RE})\\s+(?:full[- ]time\\s+|dedicated\\s+|experienced\\s+|professional\\s+)?(?:college\\s+)?(?:counselors|advisors)\\b|\\b(\\d{1,2}|${WORDNUM_RE})[- ](?:person|member)\\s+(?:college\\s+)?(?:counseling|guidance|advising)\\s+(?:team|office|staff|department)\\b`, 'i');
+  const out2 = scan([...c.idx.phrases, ...c.idx.sentences], R2, { college: 2.5 }, (m, it, w) => {
+    const n = toNum(m[1] || m[2]);
+    if (!(n >= 1 && n <= 25) || /\b(?:peer|student|grade[- ]level|school|personal|academic|mental)\s+counselors\b/i.test(m[0])) return null;
+    return mk(String(n), it, 4 + w, 'medium', { num: n });
+  });
+  if (out2.length) return best(out2);
   // fallback: job titles on the college counseling pages
   const titles = [];
   for (const page of c.pages) {
@@ -468,6 +527,7 @@ function rCounselors(c) {
     status: 'found', confidence: 'low',
     value: `${titles.length} job-title line${titles.length === 1 ? '' : 's'} on the college counseling pages:\n` + titles.slice(0, 10).map((x) => x.t).join('\n'),
     sources: [{ url: titles[0].page.finalUrl, title: titles[0].page.title }],
+    num: titles.length,   // so it can be compared with the sheet (a count of titles is usually a little low: it misses staff without the title)
     snippet: titles.slice(0, 4).map((x) => x.t).join(' … '),
     note: 'Counted from job titles, not a stated number. Check the page for names.',
   };
@@ -751,9 +811,9 @@ function rTransit(c) {
 function rMission(c) {
   const out = [];
   for (const s of c.idx.sections) {
-    if (!/mission/i.test(s.heading) || s.heading.length > 60) continue;
+    if (!/\bmission\b/i.test(s.heading) || s.heading.length > 60) continue;   // whole word: "Admissions" is not a mission heading
     const w = weightOf(s.page, { about: 3, home: 2, _: 1 });
-    const para = s.text.split('\n').map((x) => x.trim()).find((x) => x.length >= 60 && !/^•/.test(x));
+    const para = s.text.split('\n').map((x) => x.trim()).find((x) => x.length >= 60 && !/^•/.test(x) && !/^[“"‘']/.test(x));   // a quoted line is a testimonial
     if (!para) continue;
     out.push(mk(clip(para, 700), { text: s.heading + ': ' + para, page: s.page }, 4 + w, 'high'));
   }
@@ -851,13 +911,18 @@ function rTimeline(c) {
 }
 
 const AID_PAGE = /tuition|financial|afford|\baid\b|assistance/i;
-const AID_TEXT = /financial aid|tuition assistance|\bFACTS\b|clarity|\bSSS\b|\baid\b|scholarship|re-?enrollment|contracts?/i;
+const AID_TEXT = /financial aid|tuition assistance|\bFACTS\b|clarity|\bSSS\b|\baid\b|scholarship|re-?enrollment|contracts?|open houses?|campus (?:tour|visit)s?|information sessions?|info sessions?|webinar/i;
+
+/** A kindergarten / pre-K / early-childhood calendar belongs to the lower school, not a middle or upper school's. */
+function lowerOnly(c, text) {
+  return !!c.school.division && c.school.division !== 'lower' && /\b(?:kindergarten|pre-?k(?:indergarten)?|early childhood)\b/i.test(text) && !DIV_WORDS[c.school.division].test(text);
+}
 
 /**
  * Finds the date that goes with a phrase ("application opens", "decisions released").
  * Works sentence by sentence, so a date is never borrowed from the neighbouring sentence.
  */
-function datedPick(c, re, antiRe, notBetween) {
+function datedPick(c, re, antiRe, notBetween, softRe) {
   const out = [];
   for (const d of datedLines(c)) {
     // aid pages and the transfer / international tracks have their own calendars
@@ -865,6 +930,10 @@ function datedPick(c, re, antiRe, notBetween) {
     for (const s of splitSentences(d.text, true)) {
       const m = re.exec(s);
       if (!m || (antiRe && antiRe.test(s)) || /\btransfer\b/i.test(s)) continue;
+      // "Kindergarten applications open on August 13" is the entry-year calendar of the lower school, not a middle or upper school's
+      if (lowerOnly(c, s)) continue;
+      // an early-round or late-applicant date is only used when the main date is nowhere on the site
+      const soft = !!(softRe && softRe.test(s));
       let dates = findDates(s);
       // "March 12, 2027" on its own line above the sentence that explains it
       if (!dates.length && d.dates[0].index <= 2) dates = [d.dates[0]];
@@ -874,8 +943,9 @@ function datedPick(c, re, antiRe, notBetween) {
       // "opens in February and stays open until April 9": April 9 is the closing date, not the opening date
       if (notBetween && after[0] && notBetween.test(s.slice(m.index + m[0].length, pick.index))) continue;
       const stale = pick.date ? pick.date < cycleStart(c.now) : false;
-      out.push(mk(pick.raw, d, d.w + (pick.year ? 2 : 0) - (stale ? 5 : 0) + d.fit * 2, pick.year && !stale ? 'medium' : 'low', {
-        note: stale ? 'This date is from before the current admission cycle.' : (pick.year ? undefined : 'The page gives no year for this date.'),
+      out.push(mk(pick.raw, d, d.w + (pick.year ? 2 : 0) - (stale ? 5 : 0) - (soft ? 6 : 0) + d.fit * 2, pick.year && !stale && !soft ? 'medium' : 'low', {
+        note: soft ? 'This looks like an early-round or late-applicant date. The main date was not found, so check the page.'
+          : stale ? 'This date is from before the current admission cycle.' : (pick.year ? undefined : 'The page gives no year for this date.'),
       }));
     }
   }
@@ -888,7 +958,7 @@ function rOpenDate(c) {
   if (!out.length) {
     for (const it of c.idx.sentences) {
       const w = weightOf(it.page, W.admissions);
-      if (!w || AID_PAGE.test(it.page.finalUrl) || /transfer|international/i.test(it.page.finalUrl) || !RE.test(it.text) || AID_TEXT.test(it.text) || /this part|section|portion|transfer/i.test(it.text)) continue;
+      if (!w || AID_PAGE.test(it.page.finalUrl) || /transfer|international/i.test(it.page.finalUrl) || !RE.test(it.text) || AID_TEXT.test(it.text) || /this part|section|portion|transfer/i.test(it.text) || lowerOnly(c, it.text)) continue;
       const m = new RegExp(`\\b(?:in|on|by|early|mid|late)[- ]?\\s*(${MONTH}(?:\\s+20\\d{2})?)`).exec(it.text);
       // "...the lottery window closing on December 1": a closing month is not the opening month
       if (m && /\b(until|through|thru|clos(?:e|es|ed|ing)|ends?|ending|deadline|due)\b/i.test(it.text.slice(Math.max(0, m.index - 50), m.index + 6))) continue;
@@ -900,7 +970,9 @@ function rOpenDate(c) {
 
 function rDecisionDate(c) {
   const RE = /\b(decisions?|notifications?)\b[^.;]{0,60}?\b(released|sent|posted|available|emailed|mailed|communicated|shared|announced|published|delivered|go out)\b|\b(release|send|post|notify|notified)\b[^.;]{0,40}\bdecisions?\b|\bdecision notifications?\b|\bnotification (date|day)\b|\bdecision (date|day)\b/i;
-  return best(datedPick(c, RE, /financial aid|tuition assistance|reply|respond|deposit|contract|enrollment agreement|early decision/i));
+  // Early Action / Early Decision rounds and late applicants have their own dates; the regular round is the answer
+  return best(datedPick(c, RE, /financial aid|tuition assistance|reply|respond|deposit|contract|enrollment agreement/i, null,
+    /\bearly (?:action|decision|round|notification)\b|\blate (?:candidates?|applicants?|applications?)\b|\bdo(?:es)? not receive\b|\bafter (?:Jan|Feb|Mar|Apr|May)[a-z]*\.? \d/i));
 }
 
 function rClassesPerGrade(c) {

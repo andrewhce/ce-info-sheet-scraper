@@ -4,6 +4,7 @@
 //  2. exportSchool: sends it straight to an Apps Script web app ("Who has access: Anyone"; some company
 //     Google accounts do not allow that). The web app address and a shared secret are saved on this
 //     computer only, in data/export-config.json.
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { PATHS, readJson, writeJson } = require('./util');
@@ -18,23 +19,64 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{24,128}$/;
 class ExportError extends Error {}
 
 const readConfig = () => readJson(CONFIG_FILE, null);
+
+/**
+ * Whether the saved one-click address can be relied on, from what the last call to it did:
+ * 'none' (nothing saved), 'untested' (saved, never tried), 'working', or 'failing'.
+ * An address that is merely saved is NOT a working connection: an organization-only web app, for example,
+ * can be saved and still never answer this computer.
+ */
+function exportHealth(c) {
+  if (!c || !c.url || !c.token) return 'none';
+  if (!c.lastCheck) return 'untested';
+  return c.lastCheck.ok ? 'working' : 'failing';
+}
 function publicConfig() {
   const c = readConfig();
-  return c && c.url && c.token ? { configured: true, url: c.url, savedAt: c.savedAt } : { configured: false };
+  if (!(c && c.url && c.token)) return { configured: false, health: 'none' };
+  const last = c.lastCheck || null;
+  return { configured: true, url: c.url, savedAt: c.savedAt, health: exportHealth(c), lastCheckAt: last ? last.at : null, lastError: last && !last.ok ? last.error || null : null };
 }
 function saveConfig({ url, token }) {
   url = String(url || '').trim();
   token = String(token || '').trim();
   if (!URL_RE.test(url)) throw new ExportError('That is not a Google Apps Script web app address. It should look like https://script.google.com/macros/s/.../exec');
   if (!TOKEN_RE.test(token)) throw new ExportError('The secret should be 24 to 128 letters, digits, dashes or underscores. Use "Make a secret" to create one.');
-  writeJson(CONFIG_FILE, { url, token, savedAt: new Date().toISOString() });
+  writeJson(CONFIG_FILE, { url, token, savedAt: new Date().toISOString() }, { mode: 0o600 });   // a new address starts untested
+}
+/** Forgets the saved address and secret (the one-click button disappears; downloading the file still works). */
+function clearConfig() { try { fs.rmSync(CONFIG_FILE, { force: true }); } catch { /* already gone */ } }
+/** Remembers how the latest call to the saved address went, so the checklist can say what is true. */
+function recordCheck(ok, error) {
+  const c = readConfig();
+  if (!c || !c.url) return;
+  c.lastCheck = { ok: !!ok, at: new Date().toISOString(), ...(ok ? {} : { error: String(error || '').slice(0, 300) }) };
+  writeJson(CONFIG_FILE, c, { mode: 0o600 });
 }
 const newToken = () => crypto.randomBytes(24).toString('base64url');
 
-/** One call to the web app. Resolves to the script's own answer ({ok:true,...}); throws ExportError otherwise. */
+/**
+ * One call to the web app, remembering whether it worked. Resolves to the script's own answer ({ok:true,...}); throws ExportError otherwise.
+ * A reply that is not the script's own (a sign-in page, no network, a timeout) counts as failing; so does any failed "ping".
+ * A script that answers with its own error to a real export (say, a missing tab) was still reached, so that is not a connection failure.
+ */
 async function callSheet(body, fetchImpl = fetch) {
+  try {
+    const json = await callSheetRaw(body, fetchImpl);
+    recordCheck(true);
+    return json;
+  } catch (e) {
+    if (e instanceof ExportError) {
+      if (e.reached && !(body && body.action === 'ping')) recordCheck(true);
+      else if (e.notSetUp !== true) recordCheck(false, e.message);
+    }
+    throw e;
+  }
+}
+
+async function callSheetRaw(body, fetchImpl = fetch) {
   const c = readConfig();
-  if (!c || !c.url || !c.token) throw new ExportError('The Google Sheet export is not set up yet. Set it up on the Run scraper page.');
+  if (!c || !c.url || !c.token) throw Object.assign(new ExportError('The Google Sheet export is not set up yet. Set it up on the Run scraper page.'), { notSetUp: true });
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 150000);
   let res, text;
@@ -52,7 +94,7 @@ async function callSheet(body, fetchImpl = fetch) {
   try { json = JSON.parse(text); } catch {
     throw new ExportError('Google sent back a web page instead of an answer. This happens when the web app is only open to your organization: this program cannot sign in to Google. Either deploy it with "Who has access: Anyone" (if your company allows it), or use "Download file for Google Sheet" and load that file from the School Info menu in the sheet.');
   }
-  if (!json.ok) throw new ExportError(json.error || 'The sheet reported an error.');
+  if (!json.ok) throw Object.assign(new ExportError(json.error || 'The sheet reported an error.'), { reached: true });
   return json;
 }
 
@@ -133,4 +175,4 @@ async function exportSchool(id, tabIndex = 0, fetchImpl, by) {
   return { ...res, at: h[id].at };
 }
 
-module.exports = { ExportError, publicConfig, saveConfig, newToken, testConnection, buildExport, buildExportFile, FILE_KIND, exportSchool, history, callSheet, URL_RE };
+module.exports = { ExportError, publicConfig, saveConfig, clearConfig, recordCheck, exportHealth, newToken, testConnection, buildExport, buildExportFile, FILE_KIND, exportSchool, history, callSheet, URL_RE };

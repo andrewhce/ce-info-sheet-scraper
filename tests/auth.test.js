@@ -148,13 +148,19 @@ const rawCookie = (res, name) => (res.headers['set-cookie'] || []).find((c) => c
     r = await request(PORT, 'GET', '/api/overview', { headers: { cookie: 'session=' + good } }); assert.strictEqual(r.status, 200, 'a correctly signed cookie works');
     ok('a tampered, forged or expired session cookie is refused');
 
-    // actions still need the dashboard header, and the right Host
+    // actions still need the dashboard header, the right Host, and same-origin request headers
+    assert.strictEqual(r.headers['x-frame-options'], 'DENY');
+    assert.ok(r.headers['permissions-policy']);
     r = await request(PORT, 'POST', '/api/stop', { headers: { ...auth, 'content-type': 'application/json' }, body: '{}' });
     assert.strictEqual(r.status, 403);
     r = await request(PORT, 'POST', '/api/stop', { headers: { ...auth, 'content-type': 'application/json', 'x-dashboard': '1' }, body: '{}' });
     assert.strictEqual(r.status, 200);
     r = await request(PORT, 'GET', '/api/overview', { headers: { ...auth, host: 'evil.example.com' } }); assert.strictEqual(r.status, 403);
-    ok('actions need the dashboard header, and a wrong Host name is refused even when signed in');
+    r = await request(PORT, 'GET', '/api/overview', { headers: { ...auth, origin: 'https://evil.example.com' } }); assert.strictEqual(r.status, 403);
+    r = await request(PORT, 'GET', '/api/overview', { headers: { ...auth, 'sec-fetch-site': 'cross-site' } }); assert.strictEqual(r.status, 403);
+    r = await request(PORT, 'POST', '/api/stop', { headers: { ...auth, 'content-type': 'application/json', 'x-dashboard': '1', origin: 'https://evil.example.com', 'sec-fetch-site': 'cross-site' }, body: '{}' }); assert.strictEqual(r.status, 403);
+    r = await request(PORT, 'POST', '/api/stop', { headers: { ...auth, 'content-type': 'application/json', 'x-dashboard': '1', origin: `http://127.0.0.1:${PORT}`, 'sec-fetch-site': 'same-origin' }, body: '{}' }); assert.strictEqual(r.status, 200);
+    ok('actions need the dashboard header, wrong Host/Origin/cross-site API calls are refused, and security headers are set');
 
     r = await request(PORT, 'GET', '/auth/logout', { headers: auth });
     assert.strictEqual(r.status, 200); assert.ok(/Max-Age=0/.test(rawCookie(r, 'session')));

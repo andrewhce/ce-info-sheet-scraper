@@ -1,0 +1,11 @@
+# Automatic HTTPS reverse proxy for School Info Sheet (terminates TLS via Let's Encrypt
+# and preserves Host + streaming NDJSON chunks for the dashboard and Ask assistant).
+{$APP_DOMAIN} {
+	request_body {
+		max_size 160MB
+	}
+
+	reverse_proxy app:8080 {
+		flush_interval -1
+	}
+}
