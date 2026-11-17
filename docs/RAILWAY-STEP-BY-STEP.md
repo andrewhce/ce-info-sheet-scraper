@@ -109,6 +109,7 @@ The `school-info-scraper` folder is **already a Git repository** connected to Gi
 | What you see | What to do |
 | --- | --- |
 | Deploy Logs say `The program cannot start` | A variable is missing or `PUBLIC_URL` does not start with `https://`. Read the lines under it. |
+| Railway says "Dockerfile invalid: docker VOLUME ... is not supported, use Railway Volumes" | Railway refuses the `VOLUME` instruction. It was removed from the `Dockerfile` on 2026-11-17, so commit and push again. Railway also flags the capital word `VOLUME` inside a comment, so keep that word out of the `Dockerfile` completely. The storage is the Railway Volume you add in step 5. |
 | The build fails at `npm ci` or at a `COPY` line | Copy the Build Logs lines and send them over. |
 | The address says "Application failed to respond" | Open Deploy Logs. If the program is running, add a variable `PORT` with value `8080` and in **Networking** make sure the domain points at port `8080`, then redeploy. The program listens on whatever `PORT` Railway gives it, on all addresses. |
 | The deploy keeps being marked unhealthy | If you set a Healthcheck Path, it must be `/healthz` (a plain 200). Railway does not follow redirects, so `/` will fail. |
