@@ -22,6 +22,9 @@ opens the menu inside the sheet, as that person.
 
 ## One-time setup (about 5 minutes, in your Google Sheet copy)
 
+> **These same steps are in the dashboard**, in plain words and with the script ready to copy: open **Start here** and press
+> **Set up the Google Sheet menu, step by step** (or go to `#/sheet-setup`). Give teammates that page instead of this document.
+
 1. Open the sheet copy, then **Extensions, Apps Script**.
 2. **Add a new file; do not paste over an existing one.** If the project already has scripts (for example the ones that create a tab
    per school), leave them as they are. Click the **+** next to **Files**, choose **Script**, name it `School Info Export`, and paste

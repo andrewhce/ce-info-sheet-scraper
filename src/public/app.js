@@ -255,7 +255,8 @@
   }
   /** The colour key folded away under a short question, for the pages that make these files. */
   const colourDetails = () => h('details', { class: 'guide colourdetails' },
-    h('summary', null, 'What do the colours in the Google Sheet and Excel files mean?'), colourKey(true));
+    h('summary', null, 'What do the colours in the Google Sheet and Excel files mean?'), colourKey(true),
+    h('p', { class: 'small' }, 'The yellow and orange colours only appear after the Google Sheet menu is set up. ', h('a', { href: '#/sheet-setup' }, 'Set up the Google Sheet menu, step by step'), '.'));
 
   /** Tells the person the one thing to do next, from what has been done so far. */
   function nextStepCard() {
@@ -744,7 +745,8 @@
       try {
         const f = await downloadExportFile(`id=${encodeURIComponent(s.id)}&tab=${d.tabIndex}`);
         exportBox.replaceChildren(h('div', { class: 'notice ok' }, h('b', null, 'Google Sheet file saved. '),
-          `“${f.name}” is in your Downloads folder. In Google Sheets open School Info → Load export file... and pick it.`));
+          `“${f.name}” is in your Downloads folder. In Google Sheets open School Info → Load export file... and pick it. `,
+          h('a', { href: '#/sheet-setup' }, 'The School Info menu is not there yet? Set it up step by step'), '.'));
       } catch (e) { exportBox.replaceChildren(h('div', { class: 'notice' }, h('b', null, 'The file could not be made. '), e.message)); }
       fileBtn.disabled = false;
     } }, 'File for Google Sheet');
@@ -938,7 +940,7 @@
       h('summary', null, 'Advanced: Google Sheet “School Info” menu & direct sync'),
       h('p', { class: 'muted small' }, 'Most people can simply use the Excel (.xlsx) or CSV downloads above. If your team wants the special “School Info” menu inside Google Sheets (which highlights new cells yellow and puts suggestions in comments), follow this one-time setup:'),
       colourDetails(),
-      h('p', { class: 'small' }, h('b', null, 'Set up once in your Google Sheet copy: '), 'click Extensions → Apps Script, replace or add a Script file with the copied code, click Save, and reload your sheet.'),
+      h('p', { class: 'small' }, h('b', null, 'Set up once in your Google Sheet copy: '), 'the steps, with the script to copy, are on their own page: ', h('a', { href: '#/sheet-setup' }, 'Set up the Google Sheet menu, step by step'), '.'),
       h('div', { class: 'runbtns' }, copyCodeBtn, dlBtn), out,
       exportPanel(),
       h('p', { class: 'muted small' }, 'Want to inspect how extraction rules work? ', h('a', { href: '#/script' }, 'View source files & extraction rules'), '.'));
@@ -1098,6 +1100,7 @@
         h('a', { class: 'btn primary', href: '#/' }, ready ? `Open the list of ${ov.schools.length} schools` : 'Open the list of schools'),
         xlsxBtn, csvBtn, saveZip),
       out,
+      STATIC ? null : h('p', { class: 'small' }, h('b', null, 'Want the answers inside your Google Sheet? '), h('a', { href: '#/sheet-setup' }, 'Set up the Google Sheet menu, step by step'), ' (about 5 minutes, once).'),
       STATIC ? null : colourDetails());
   }
 
@@ -2336,6 +2339,104 @@
       h('div', { class: 'runbtns' }, exportBtn));
   }
 
+  // ------------------------------------------- Google Sheet menu: step-by-step setup ---
+  // The script (google-sheet/Code.gs) adds a "School Info" menu to a copy of the Google Sheet. This page has the script to copy
+  // and the steps to put it in the sheet and to use it, so nobody has to find a document.
+  async function viewSheetSetup() {
+    const key = (...keys) => keys.flatMap((k, i) => [i ? ' + ' : null, h('kbd', null, k)]);
+    let code = null;
+    const loadCode = async () => { if (code == null) code = (await api('/api/code?file=' + encodeURIComponent('google-sheet/Code.gs'))).content; return code; };
+    const out = h('p', { class: 'small' });
+    const say = (msg, bad) => { out.textContent = msg; out.className = 'small ' + (bad ? 'bad' : 'good'); };
+    const out2 = h('p', { class: 'small' });
+    const say2 = (msg, bad) => { out2.textContent = msg; out2.className = 'small ' + (bad ? 'bad' : 'good'); };
+
+    const copyBtn = h('button', { class: 'btn primary', type: 'button' }, 'Copy the script');
+    copyBtn.onclick = async () => {
+      copyBtn.disabled = true;
+      try {
+        const ok = await copyText(await loadCode(), copyBtn);
+        say(ok ? 'Copied. Now go to your Apps Script tab, click in the empty file, and press Ctrl + V to paste it.'
+          : 'Your browser would not let the dashboard copy it. Open “Show the script” below, select all of it, and copy it by hand.', !ok);
+      } catch (e) { say(e.message, true); }
+      copyBtn.disabled = false;
+    };
+    const scraped = S.ov && S.ov.ready ? S.ov.schools.filter((s) => s.status === 'ok').length : 0;
+    const dlBtn = h('button', { class: 'btn', type: 'button', disabled: !scraped }, scraped ? `Download the file for ${scraped} checked school${scraped === 1 ? '' : 's'}` : 'Check some school websites first');
+    dlBtn.onclick = async () => {
+      dlBtn.disabled = true;
+      try {
+        const f = await downloadExportFile('all=1');
+        say2(`Saved “${f.name}” with ${f.count} school${f.count === 1 ? '' : 's'} in your Downloads folder.` + (f.skipped ? ` (${f.skipped} left out: not checked yet, nothing found, or a website that may be a different school.)` : ''));
+      } catch (e) { say2(e.message, true); }
+      dlBtn.disabled = false;
+    };
+    const version = h('span', { class: 'muted small' });
+    const codeBox = h('pre', { class: 'code', hidden: true });
+    const showCode = h('details', { class: 'panel' }, h('summary', null, 'Show the script (to copy by hand)'), codeBox);
+    showCode.addEventListener('toggle', async () => {
+      if (!showCode.open || codeBox.textContent) return;
+      try { const c = await loadCode(); setKids(codeBox, c.split('\n').map((l) => h('span', null, l || ' '))); codeBox.hidden = false; } catch (e) { codeBox.textContent = e.message; codeBox.hidden = false; }
+    });
+    loadCode().then((c) => {
+      const m = /var VERSION = '([^']+)'/.exec(c);
+      version.textContent = m ? `The script in this dashboard is version ${m[1]}.` : '';
+    }).catch(() => {});
+
+    const problem = (q, ...a) => h('details', null, h('summary', null, q), h('p', null, ...a));
+    setKids(app,
+      h('a', { class: 'crumb', href: '#/start' }, '← Start here'),
+      h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Set up the Google Sheet menu, step by step'),
+        h('p', null, 'This adds a ', h('b', null, 'School Info'), ' menu to a copy of your Google Sheet. The menu loads what the dashboard found into each school’s tab: blank cells are filled in (yellow), and where the website says something different your answer is left alone and a note is added (orange). It never overwrites anything a person typed.'),
+        h('p', null, 'You set it up once for each Google Sheet. It takes about 5 minutes, and you do not need your company’s Google administrator: the script only runs when a person opens the menu, as that person.'))),
+
+      h('div', { class: 'panel' }, h('h2', null, 'Before you start'),
+        h('ul', null,
+          h('li', null, 'Use a ', h('b', null, 'copy'), ' of your School Information Sheet, so your original is untouched. In Google Sheets: ', h('b', null, 'File → Make a copy'), '.'),
+          h('li', null, 'You need permission to edit that sheet.'),
+          h('li', null, 'Keep this dashboard open in one browser tab and the Google Sheet in another.'))),
+
+      h('div', { class: 'panel' }, h('h2', null, 'Part 1: put the script in your Google Sheet (once)'),
+        h('ol', { class: 'stepslist' },
+          h('li', null, h('b', null, 'Open your Google Sheet copy'), ' in your browser.'),
+          h('li', null, 'In the top menu click ', h('b', null, 'Extensions'), ', then ', h('b', null, 'Apps Script'), '. A new browser tab opens. This is the script editor.'),
+          h('li', null, 'In the left column, next to the word ', h('b', null, 'Files'), ', click the ', h('b', null, '+'), ' button and choose ', h('b', null, 'Script'), '. Type the name ', h('b', null, 'School Info Export'), ' and press Enter. ',
+            h('b', null, 'Add a new file: '), 'do not paste over a file that is already there. If the project already has other scripts, leave them alone.'),
+          h('li', null, 'Press the button below to copy the script.', h('div', { class: 'runbtns' }, copyBtn), out, version),
+          h('li', null, 'Click inside the empty file in the editor and press ', ...key('Ctrl', 'A'), ' and then ', ...key('Ctrl', 'V'), ' to paste the script. You should see a long list of code.'),
+          h('li', null, h('b', null, 'Optional: '), 'near the top of the code find the line ', h('code', null, 'NOTIFY_EMAILS: \'\','), ' and type the email addresses between the two quote marks, separated by commas. Those people get one email a day listing the schools that were loaded. You can do this later.'),
+          h('li', null, 'Click the ', h('b', null, 'Save'), ' button (the disk icon) or press ', ...key('Ctrl', 'S'), '.'),
+          h('li', null, 'Go back to your Google Sheet tab and ', h('b', null, 'reload the page'), ' (press ', ...key('F5'), '). After a few seconds a new menu called ', h('b', null, 'School Info'), ' appears after Help. If it does not, see “I do not see the School Info menu” below.'),
+          h('li', null, h('b', null, 'The first time'), ' you use the menu, Google asks you to allow the script. Click ', h('b', null, 'School Info → Load export file…'), ', then ', h('b', null, 'Continue'), ' and choose your Google account. If it says “Google hasn’t verified this app”, click ', h('b', null, 'Advanced'), ', then ', h('b', null, 'Go to School Info Export (unsafe)'), ', then ', h('b', null, 'Allow'), '. It is your own script. It asks to see and edit this spreadsheet (to fill in the cells), to show its window, and to send the daily email.')),
+        showCode),
+
+      h('div', { class: 'panel' }, h('h2', null, 'Part 2: load the answers into your sheet (every time)'),
+        h('ol', { class: 'stepslist' },
+          h('li', null, h('b', null, 'Make the file in this dashboard. '), 'Open one school and press ', h('b', null, 'File for Google Sheet'), ', or press the button below for every checked school.', h('div', { class: 'runbtns' }, dlBtn), out2,
+            h('span', { class: 'muted small' }, 'The file is named school-info-export-….json and goes to your Downloads folder. It holds only what was found on the school websites: nothing from your sheet, and no keys.')),
+          h('li', null, 'In your Google Sheet click ', h('b', null, 'School Info → Load export file…'), '.'),
+          h('li', null, 'Click ', h('b', null, 'Choose file'), ', pick the file you just downloaded, then click ', h('b', null, 'Load into this sheet'), '.'),
+          h('li', null, h('b', null, 'Keep that window open until it says Done. '), 'It loads one school at a time, a few seconds each, so a file with every school takes a while. If it stops or a school fails, load the same file again: that is safe, because nothing already written is changed.'),
+          h('li', null, 'Open a school’s tab and look at the colours. Point at a coloured cell to read its note. When a school has been checked, tick ', h('b', null, 'Reviewed?'), ' on the ', h('b', null, 'Export Log'), ' tab.')),
+        colourKey(true)),
+
+      h('div', { class: 'panel' }, h('h2', null, 'Optional: a daily email'),
+        h('p', null, 'In the sheet click ', h('b', null, 'School Info → Start the daily email'), '. Each day at about 5 pm (the sheet’s time zone) the people listed in ', h('code', null, 'NOTIFY_EMAILS'), ' get one email listing the schools that were loaded since the last one, so someone can fact check them. Loading works without it.')),
+
+      h('div', { class: 'panel' }, h('h2', null, 'Updating the script later'),
+        h('p', null, 'When this dashboard gets a newer script, open ', h('b', null, 'Extensions → Apps Script'), ' in your sheet, click the ', h('b', null, 'School Info Export'), ' file, press ', ...key('Ctrl', 'A'), ', press the ', h('b', null, 'Copy the script'), ' button above, paste with ', ...key('Ctrl', 'V'), ', and save. You do not need to allow it again. The version of the script in your sheet is on the line ', h('code', null, 'var VERSION'), ' near the top of the file.')),
+
+      h('div', { class: 'panel' }, h('h2', null, 'If something goes wrong'),
+        problem('I do not see the School Info menu.', 'Reload the sheet and wait a few seconds. If it is still missing, go to the Apps Script tab, choose ', h('b', null, 'onOpen'), ' in the function list at the top (next to Run) and press ', h('b', null, 'Run'), ' once, answer Google’s permission questions, then reload the sheet.'),
+        problem('Google says “Authorization required” or “hasn’t verified this app”.', 'This is expected for your own script. Click Continue and choose your account. Then click Advanced, then Go to School Info Export (unsafe), then Allow.'),
+        problem('Nothing happens, or it says a function cannot be found.', 'The pasted code is probably incomplete. In the editor press Ctrl + A, press Delete, use Copy the script again, paste with Ctrl + V, and Save.'),
+        problem('It stopped halfway, or one school failed.', 'Load the same file again. Loading the same file twice is safe: notes do not pile up and nothing already written is changed.'),
+        problem('A cell did not turn yellow.', 'Yellow is only for cells that were blank. A cell that already had text is left alone (orange with a note if the website says something different), and a cell that already has a colour of its own keeps it.'),
+        problem('A school has no tab in my sheet.', 'The script makes a new tab for it from your Master Template.'),
+        problem('My project already has a function called onOpen.', 'A project can have only one onOpen. Ask whoever looks after those scripts to join the two, or run the School Info menu from the other script’s onOpen.')),
+      h('p', { class: 'muted small' }, 'Google sometimes changes the wording of its menus a little. The steps stay the same. There is also an advanced “send with one click” option for companies that allow it: see ', h('a', { href: '#/start' }, 'Start here'), ', under Advanced.'));
+  }
+
   // ------------------------------------------------------------- help view ---
   // The plain-words guide: what the dashboard is, how to use it, and what every word and colour means.
   function viewHelp(section) {
@@ -2372,7 +2473,7 @@
         h('p', null, h('b', null, 'Why does it ignore my sheet? '), 'Because your sheet can be out of date or have mistakes. An answer is trusted for where it came from, not for matching a spreadsheet.'),
         h('p', null, h('b', null, 'Is “Safe to use” always right? '), 'No. It means the evidence is strong, not that it is certain. The ✓ Right and ✗ Wrong buttons let you check, and the Accuracy page shows how often the ratings turn out to be right.')),
       h('div', { class: 'panel', id: 'help-colours' }, h('h2', null, 'What the colours mean in your Google Sheet and Excel files'),
-        h('p', null, 'When you send answers to your Google Sheet (open the sheet, then ', h('b', null, 'School Info → Load export file…'), ') or download the Excel file, some cells are coloured to show what happened to them. The dashboard never changes your own sheet file. Here is the key:'),
+        h('p', null, 'When you send answers to your Google Sheet (open the sheet, then ', h('b', null, 'School Info → Load export file…'), ') or download the Excel file, some cells are coloured to show what happened to them. The dashboard never changes your own sheet file. The School Info menu needs a one-time setup: ', h('a', { href: '#/sheet-setup' }, 'step by step'), '. Here is the key:'),
         colourKey(false),
         h('h3', null, 'The colours inside this dashboard'),
         h('dl', { class: 'glossary' },
@@ -2409,6 +2510,7 @@
           'Hello, we are Cardinal Education. We keep a School Information Sheet for families, using only facts that are public on schools’ own websites. Our small program reads one page at a time, follows your robots.txt, and names itself “SchoolInfoSheetBot/1.0 (polite research crawler; reads public school pages only)”. Your website’s security check currently stops it. Could your web team allow that name, or send us your current fact sheet (tuition, dates, enrollment, class sizes)? Thank you.')),
       h('div', { class: 'panel', id: 'help-questions' }, h('h2', null, 'Common questions'),
         h('details', null, h('summary', null, 'Do I have to wait while the sheet loads, or while websites are checked?'), h('p', null, 'No. Loading your sheet, checking websites, making a file, adding a teammate’s results and waiting for an Ask answer all keep going while you open other pages. A small card at the bottom right of every page shows what is running, and tells you when it is done with a link to the result. Checking websites also shows in the bar at the top. Just do not turn the dashboard off or close the browser window while something is running.')),
+        h('details', null, h('summary', null, 'How do I install the Google Sheet script (the School Info menu)?'), h('p', null, 'It takes about 5 minutes and you do it once for each Google Sheet. The dashboard has the script to copy and every step on its own page: ', h('a', { href: '#/sheet-setup' }, 'Set up the Google Sheet menu, step by step'), '.')),
         h('details', null, h('summary', null, 'What do the yellow and orange cells in my Google Sheet mean?'), h('p', null, 'Yellow: a blank cell the dashboard filled in from the school’s website. Orange: your sheet already had a different answer, so nothing was overwritten and the website’s answer is in the cell’s note. Point at a cell to read its note. ', helpLink('colours', 'See the full colour key'), '.')),
         h('details', null, h('summary', null, 'Does the dashboard change my Google Sheet?'), h('p', null, 'No. It only reads the file you give it. You copy the answers yourself, or use the buttons to send answers to a copy of your sheet.')),
         h('details', null, h('summary', null, 'Why is an answer missing?'), h('p', null, 'Either the school does not publish it, or it is behind a login (such as an application portal), or the website is built in a way the dashboard cannot read. These are filled in by hand.')),
@@ -2422,7 +2524,7 @@
   async function route() {
     const hash = location.hash.replace(/^#\/?/, '');
     let view = hash.split('/')[0];
-    if (STATIC && (view === 'run' || view === 'start' || view === 'ask')) { view = 'schools'; history.replaceState(null, '', '#/'); }
+    if (STATIC && (view === 'run' || view === 'start' || view === 'ask' || view === 'sheet-setup')) { view = 'schools'; history.replaceState(null, '', '#/'); }
     if (STATIC && (view === 'accuracy' || view === 'review')) { view = 'schools'; history.replaceState(null, '', '#/'); }
     runUi = null; askUi = null;
     try {
@@ -2432,7 +2534,7 @@
       S.view = view;
       for (const t of [...TASKS.values()]) if (t.hideOnView === view && t.state !== 'running') TASKS.delete(t.id);   // already seen on its own page
       drawTasks();   // a card meant for another page (such as Ask's) hides itself on that page
-      const TITLES = { start: 'Start here', run: 'Check websites', ask: 'Ask', accuracy: 'Accuracy', review: 'To check', help: 'Help', script: 'Technical details' };
+      const TITLES = { start: 'Start here', run: 'Check websites', ask: 'Ask', accuracy: 'Accuracy', review: 'To check', help: 'Help', script: 'Technical details', 'sheet-setup': 'Google Sheet setup' };
       document.title = (view === 'school' ? 'School' : TITLES[view] || 'Schools') + ' · School Info Sheet';   // tells browser tabs apart
       document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.view === (view === 'school' ? 'schools' : view)));
       if (view === 'start') return await viewStart();
@@ -2442,6 +2544,7 @@
       if (view === 'accuracy') return await viewAccuracy();
       if (view === 'review') return await viewReview();
       if (view === 'help') return viewHelp(hash.split('/')[1]);
+      if (view === 'sheet-setup') return await viewSheetSetup();
       if (view === 'script') return await viewScript(hash.slice('script/'.length));
       return viewSchools();
     } catch (e) {

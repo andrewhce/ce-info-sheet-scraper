@@ -446,6 +446,13 @@ td.name .sub { margin-top: 2px; }
 .tasktext a { display: inline-block; margin-top: 4px; font-weight: 600; }
 .taskx { all: unset; cursor: pointer; flex: none; padding: 0 4px; font-size: 14px; color: var(--muted); }
 .taskx:hover { color: var(--ink); }
+/* the Google Sheet setup page */
+.stepslist { margin: 10px 0 0; padding-left: 26px; }
+.stepslist li { margin-bottom: 12px; line-height: 1.55; padding-left: 4px; }
+.stepslist li::marker { font-weight: 700; color: var(--accent); }
+.stepslist .runbtns { margin: 8px 0 4px; }
+kbd { display: inline-block; padding: 1px 7px; font: 600 12.5px var(--mono); color: var(--ink); background: var(--mute-bg); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; }
+code { font: 13px var(--mono); padding: 1px 5px; background: var(--mute-bg); border-radius: 4px; }
 .savedlist { list-style: none; margin: 10px 0 0; padding: 0; }
 .savedlist li { padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .savedlist li .sub { margin-top: 2px; }

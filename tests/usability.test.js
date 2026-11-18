@@ -578,6 +578,37 @@ function startServer(port, dataDir) {
       ok('loading the sheet keeps going on other pages, shows a card, and never pulls the person back to Start here');
     }
 
+    // The Google Sheet script: the steps to install and use it are in the dashboard, with the script to copy
+    {
+      const setup = await renderRoute({ hash: '#/sheet-setup' });
+      const st = setup.walkText(setup.rootApp).replace(/\|/g, '');
+      for (const need of ['Set up the Google Sheet menu, step by step', 'Before you start', 'Part 1', 'Part 2', 'Extensions', 'Apps Script', 'School Info Export', 'Add a new file', 'Copy the script', 'Save', 'reload the page',
+        'Advanced', 'Go to School Info Export (unsafe)', 'Allow', 'Choose file', 'Load into this sheet', 'Keep that window open until it says Done', 'Reviewed?', 'If something goes wrong', 'I do not see the School Info menu']) {
+        assert.ok(st.includes(need), `the setup page says: ${need}`);
+      }
+      assert.ok(st.includes('Download the file for 1 checked school'), 'it offers the file for the checked schools');
+      assert.strictEqual((st.match(/Yellow:/g) || []).length, 1, 'and shows the colour key');
+      // the menu names in the steps are the real ones from the script
+      const gs = fs.readFileSync(path.join(ROOT, 'google-sheet', 'Code.gs'), 'utf8');
+      const menu = /createMenu\('([^']+)'\)/.exec(gs)[1];
+      const items = [...gs.matchAll(/\.addItem\('([^']+)'/g)].map((m) => m[1].replace(/\.\.\./g, '…'));
+      assert.ok(menu === 'School Info' && items.length >= 2, 'the script adds a School Info menu with items');
+      for (const item of items) assert.ok(st.includes(item), `the steps name the menu item “${item}” exactly as the script makes it`);
+      assert.ok(st.includes('NOTIFY_EMAILS') && /NOTIFY_EMAILS:\s*''/.test(gs), 'the step about the email setting names a line that exists in the script');
+      const copy = setup.buttons().find((b) => setup.walkText(b) === 'Copy the script');
+      assert.ok(copy, 'there is a Copy the script button');
+      await copy.click();
+      await setup.settle();
+      assert.ok(setup.calls.some((c) => c.url === '/api/code'), 'the script comes from the dashboard');
+      assert.strictEqual(setup.doc.title, 'Google Sheet setup · School Info Sheet');
+      // it can be found from where people look
+      for (const hsh of ['#/start', '#/school/a', '#/help']) {
+        const r = await renderRoute({ hash: hsh });
+        assert.ok(r.links().some((a) => a.attrs.href === '#/sheet-setup'), `${hsh} links to the step-by-step setup`);
+      }
+      ok('the Google Sheet script has its own step-by-step page with the script to copy, the real menu names, and links from Start here, school pages and Help');
+    }
+
     // The AI settings on a shared server: the administrator sees and edits them, everyone else only sees the status
     {
       const notConnected = { ready: false, anthropic: { configured: false, keyHint: null, keySource: null, model: 'claude-sonnet-5-5', models: [{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (cheaper)' }] }, locked: { model: true, effort: true, costPolicy: true }, sharedServer: true };
