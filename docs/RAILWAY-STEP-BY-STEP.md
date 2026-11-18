@@ -74,6 +74,7 @@ The `school-info-scraper` folder is **already a Git repository** connected to Gi
     - `CRAWL_PARALLEL_SITES`: how many websites are read at once (default 8).
     - `ASK_ADMIN_EMAILS`: the email of the person who may set the AI key from the **Ask** page (several can be listed with commas). That person signs in, opens **Ask**, and pastes the key into the **AI settings · administrator only** box. Nobody else can see it. If you leave this out, nobody can change the AI settings from the page.
     - `ANTHROPIC_API_KEY`: the other way to switch on the **Ask** page, set here instead of in the box. See `docs/ASK.md` for what data goes to the AI service.
+    - `SESSION_DAYS`: how many days a signed-in browser stays logged in via sliding renewal until clicking Sign out (default `30`).
     - `SESSION_SECRET`: 32 or more random characters. If you skip it, one is made and kept on the volume.
 
 13. Railway redeploys. When the deploy shows **Active**, the service is up.
@@ -98,7 +99,7 @@ The `school-info-scraper` folder is **already a Git repository** connected to Gi
 - **A redeploy stops a check in progress.** Choose "Schools not checked yet" and press Start checking again; it carries on.
 - **Some school websites may block a server's address** more than your office connection. Those show as "Blocked by site" and are left alone. Compare a few schools with your own computer's results before judging the online version.
 - **One check runs at a time**, however many people press the button.
-- **Sign-in lasts 12 hours**, then Google asks again.
+- **Sign-in stays cached across tab/browser closes** for 30 days by default (`SESSION_DAYS`, sliding renewal while active) until you click **Sign out**.
 - **Cost:** Railway bills by use (memory, processor, network, the volume). Look at the **Usage** page after a day.
 - **Use a separate Slack channel, or leave Slack off, for the test.** Otherwise your own computer and Railway can both announce the same changes.
 - **Keep the GitHub repository private** and the list of people with access short. The sign-in protects the running service, not the code.

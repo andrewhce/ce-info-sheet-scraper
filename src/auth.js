@@ -10,6 +10,7 @@
 //   ALLOWED_EMAIL_DOMAIN   for example cardinaleducation.com: only Google Workspace accounts of that domain get in
 //   ALLOWED_EMAILS         optional extra single addresses, comma separated
 //   SESSION_SECRET         optional, 32+ random characters; if missing one is made and kept in the data folder
+//   SESSION_DAYS           optional persistent "remember me" sliding window in days (default 30, range 1..365)
 // The program refuses to listen on anything but this computer unless sign-in is fully set up.
 const crypto = require('crypto');
 const fs = require('fs');
@@ -18,7 +19,10 @@ const { PATHS } = require('./lib/util');
 
 const env = process.env;
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
-const SESSION_SECONDS = 12 * 3600;
+const sessionDays = Math.min(365, Math.max(1, Number(env.SESSION_DAYS) || 30));
+const SESSION_SECONDS = Math.round(sessionDays * 86400);
+// Refresh at most once per day (or half-lifetime for short TTLs) so active polling does not churn cookies on every request.
+const REFRESH_AFTER_SECONDS = Math.min(86400, Math.floor(SESSION_SECONDS / 2));
 
 const settings = {
   host: env.HOST || '127.0.0.1',
@@ -89,14 +93,33 @@ function cookies(req) {
   }
   return out;
 }
-const cookie = (name, value, seconds) =>
-  `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${secureCookies ? '; Secure' : ''}`;
+const cookie = (name, value, seconds) => {
+  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+  const expires = sec > 0
+    ? new Date(Date.now() + sec * 1000).toUTCString()
+    : 'Thu, 01 Jan 1970 00:00:00 GMT';
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${sec}; Expires=${expires}${secureCookies ? '; Secure' : ''}`;
+};
+
+/**
+ * Verifies the signed session cookie and transparently mints a sliding renewal cookie once
+ * REFRESH_AFTER_SECONDS has elapsed so active users stay signed in across tab/browser closes.
+ */
+function authenticate(req) {
+  if (!enabled) return { user: { email: null, name: 'This computer', local: true }, refreshCookie: null };
+  const s = verify(cookies(req).session);
+  if (!s || !s.email) return { user: null, refreshCookie: null };
+  const user = { email: s.email, name: s.name || s.email };
+  const now = Math.floor(Date.now() / 1000);
+  const age = (now + SESSION_SECONDS) - Number(s.exp || 0);
+  if (age < REFRESH_AFTER_SECONDS) return { user, refreshCookie: null };
+  const fresh = sign({ email: user.email, name: user.name, exp: now + SESSION_SECONDS });
+  return { user, refreshCookie: cookie('session', fresh, SESSION_SECONDS) };
+}
 
 /** The signed-in person, or null. Without sign-in set up (this computer only) everyone is the local user. */
 function sessionUser(req) {
-  if (!enabled) return { email: null, name: 'This computer', local: true };
-  const s = verify(cookies(req).session);
-  return s && s.email ? { email: s.email, name: s.name || s.email } : null;
+  return authenticate(req).user;
 }
 
 function hostAllowed(hostHeader) {
@@ -156,6 +179,15 @@ async function handle(req, res, url, send) {
   if (!enabled) { html(404, page('Sign-in is not set up', 'This copy of the program runs on one computer and does not use sign-in.')); return true; }
 
   if (p === '/auth/login') {
+    if (!url.searchParams.get('switch')) {
+      const existing = authenticate(req);
+      if (existing.user) {
+        const headers = { Location: safeNext(url.searchParams.get('next')) };
+        if (existing.refreshCookie) headers['Set-Cookie'] = existing.refreshCookie;
+        send(res, 302, '', 'text/plain; charset=utf-8', headers);
+        return true;
+      }
+    }
     const state = crypto.randomBytes(16).toString('base64url');
     const nonce = crypto.randomBytes(16).toString('base64url');
     const verifier = crypto.randomBytes(32).toString('base64url');
@@ -194,7 +226,7 @@ async function handle(req, res, url, send) {
       fail(400, 'Sign-in could not be verified', 'Google’s answer did not check out. Please try again.'); return true;
     }
     if (!allowed(claims.email, claims.hd)) {
-      html(403, page('This account is not allowed in', `${escapeHtml(claims.email)} is not on the list for this program. Sign in with your company Google account.`, { href: '/auth/login', text: 'Use another account' }), { 'Set-Cookie': clearOauth });
+      html(403, page('This account is not allowed in', `${escapeHtml(claims.email)} is not on the list for this program. Sign in with your company Google account.`, { href: '/auth/login?switch=1', text: 'Use another account' }), { 'Set-Cookie': clearOauth });
       return true;
     }
     const session = sign({ email: String(claims.email).toLowerCase(), name: claims.name || claims.email, exp: now + SESSION_SECONDS });
@@ -210,4 +242,4 @@ async function handle(req, res, url, send) {
   return true;
 }
 
-module.exports = { settings, enabled, loopbackOnly, problems, sessionUser, hostAllowed, originAllowed, handle, sign, verify };
+module.exports = { settings, enabled, loopbackOnly, problems, authenticate, sessionUser, hostAllowed, originAllowed, handle, sign, verify, SESSION_SECONDS };

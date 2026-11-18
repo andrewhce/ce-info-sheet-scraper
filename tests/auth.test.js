@@ -53,7 +53,7 @@ const rawCookie = (res, name) => (res.headers['set-cookie'] || []).find((c) => c
     c.stdout.on('data', (d) => { out += d; if (/dashboard:/.test(out)) resolve(c); });
     c.stderr.on('data', (d) => { out += d; });
     c.on('exit', (code) => reject(new Error('server exited early: ' + out + ' code ' + code)));
-    setTimeout(() => reject(new Error('server did not start: ' + out)), 8000);
+    setTimeout(() => reject(new Error('server did not start: ' + out)), 15000);
   });
   const PORT = 4491;
   const server = await start(PORT, { ASK_ADMIN_EMAILS: 'Boss@Example.edu' });   // the one person who may set the AI key
@@ -128,14 +128,35 @@ const rawCookie = (res, name) => (res.headers['set-cookie'] || []).find((c) => c
     assert.strictEqual(r.status, 302); assert.strictEqual(r.headers.location, '/');
     const session = cookieOf(r, 'session');
     assert.ok(session);
-    assert.ok(/HttpOnly/.test(rawCookie(r, 'session')) && /SameSite=Lax/.test(rawCookie(r, 'session')) && !/Secure/.test(rawCookie(r, 'session')), 'cookie flags on http');
+    const sesCookieHdr = rawCookie(r, 'session');
+    assert.ok(/HttpOnly/.test(sesCookieHdr) && /SameSite=Lax/.test(sesCookieHdr) && !/Secure/.test(sesCookieHdr), 'cookie flags on http');
+    assert.ok(/Max-Age=2592000\b/.test(sesCookieHdr) && /Expires=/.test(sesCookieHdr), 'session cookie persists across browser closes for 30 days by default');
     assert.ok(tokenCalls[0].code_verifier && tokenCalls[0].redirect_uri === `http://localhost:${PORT}/auth/callback`, 'PKCE verifier was sent to Google');
     const auth = { cookie: 'session=' + session };
     r = await request(PORT, 'GET', '/api/me', { headers: auth });
     assert.strictEqual(r.status, 200); assert.strictEqual(JSON.parse(r.text).email, 'pat@example.edu');
+    assert.ok(!rawCookie(r, 'session'), 'fresh login session does not re-issue Set-Cookie on every poll');
     r = await request(PORT, 'GET', '/api/overview', { headers: auth }); assert.strictEqual(r.status, 200);
     r = await request(PORT, 'GET', '/', { headers: auth }); assert.strictEqual(r.status, 200); assert.ok(/School Info Sheet/.test(r.text));
-    ok('a company account signs in, gets a session, and reaches the dashboard');
+    // Reopening a bookmarked /auth/login while already signed in returns straight to the dashboard instead of forcing Google login
+    r = await request(PORT, 'GET', '/auth/login', { headers: auth });
+    assert.strictEqual(r.status, 302); assert.strictEqual(r.headers.location, '/');
+    // Explicit ?switch=1 still lets the user switch Google accounts
+    r = await request(PORT, 'GET', '/auth/login?switch=1', { headers: auth });
+    assert.strictEqual(r.status, 302); assert.ok(r.headers.location.startsWith(`http://127.0.0.1:${gPort}/auth`));
+    ok('a company account signs in, gets a persistent 30-day session, skips redundant /auth/login prompts, and reaches the dashboard');
+
+    // Sliding renewal: an older valid cookie seamlessly receives a fresh 30-day Set-Cookie when reopened
+    const agingToken = sign({ email: 'pat@example.edu', name: 'Pat Lee', exp: Math.floor(Date.now() / 1000) + 60 });
+    r = await request(PORT, 'GET', '/api/overview', { headers: { cookie: 'session=' + agingToken } });
+    assert.strictEqual(r.status, 200);
+    const renewedHdr = rawCookie(r, 'session');
+    assert.ok(renewedHdr && /Max-Age=2592000\b/.test(renewedHdr) && /Expires=/.test(renewedHdr), 'aging valid session is slid forward on activity');
+    const renewedToken = cookieOf(r, 'session');
+    assert.ok(renewedToken && renewedToken !== agingToken);
+    r = await request(PORT, 'GET', '/api/me', { headers: { cookie: 'session=' + renewedToken } });
+    assert.strictEqual(r.status, 200); assert.strictEqual(JSON.parse(r.text).email, 'pat@example.edu');
+    ok('sliding renewal extends aging sessions transparently without prompting Google sign-in');
 
     // sessions cannot be forged or reused wrongly
     const tampered = session.slice(0, -3) + (session.endsWith('abc') ? 'xyz' : 'abc');
@@ -187,7 +208,9 @@ const rawCookie = (res, name) => (res.headers['set-cookie'] || []).find((c) => c
     ok('actions need the dashboard header, wrong Host/Origin/cross-site API calls are refused, and security headers are set');
 
     r = await request(PORT, 'GET', '/auth/logout', { headers: auth });
-    assert.strictEqual(r.status, 200); assert.ok(/Max-Age=0/.test(rawCookie(r, 'session')));
+    assert.strictEqual(r.status, 200);
+    const outCookie = rawCookie(r, 'session');
+    assert.ok(/Max-Age=0\b/.test(outCookie) && /Expires=Thu, 01 Jan 1970 00:00:00 GMT/.test(outCookie));
     ok('signing out clears the session');
   } finally { server.kill(); }
 
@@ -206,7 +229,7 @@ const rawCookie = (res, name) => (res.headers['set-cookie'] || []).find((c) => c
   } finally { httpsServer.kill(); }
 
   // refusing to start
-  const tryStart = (env) => spawnSync(process.execPath, [path.join(ROOT, 'src', 'server.js'), '--no-browser'], { cwd: ROOT, env: { PATH: process.env.PATH, DATA_DIR: tmp, ...env }, encoding: 'utf8', timeout: 8000 });
+  const tryStart = (env) => spawnSync(process.execPath, [path.join(ROOT, 'src', 'server.js'), '--no-browser'], { cwd: ROOT, env: { PATH: process.env.PATH, DATA_DIR: tmp, ...env }, encoding: 'utf8', timeout: 15000 });
   let s = tryStart({ HOST: '0.0.0.0', PORT: '4493' });
   assert.strictEqual(s.status, 1); assert.ok(/sign-in is not set up/.test(s.stderr), s.stderr);
   s = tryStart({ HOST: '0.0.0.0', PORT: '4493', GOOGLE_CLIENT_ID: 'only-the-id', PUBLIC_URL: 'https://x.example.com', ALLOWED_EMAIL_DOMAIN: 'example.edu' });

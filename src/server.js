@@ -300,11 +300,12 @@ const server = http.createServer(async (req, res) => {
     if (!auth.hostAllowed(req.headers.host)) return send(res, 403, { error: 'forbidden' });
     if (await auth.handle(req, res, url, send)) return;          // /auth/login, /auth/callback, /auth/logout
     if ((p.startsWith('/api/') || req.method === 'POST') && !auth.originAllowed(req)) return send(res, 403, { error: 'forbidden' });
-    const user = auth.sessionUser(req);
+    const { user, refreshCookie } = auth.authenticate(req);
     if (!user) {
       if (p.startsWith('/api/')) return send(res, 401, { error: 'Please sign in again.', signIn: '/auth/login' });
       return send(res, 302, '', 'text/plain; charset=utf-8', { Location: '/auth/login' });
     }
+    if (refreshCookie) res.setHeader('Set-Cookie', refreshCookie);
 
     if (req.method === 'POST') {
       if (req.headers['x-dashboard'] !== '1') return send(res, 403, { error: 'forbidden' });

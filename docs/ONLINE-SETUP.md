@@ -63,8 +63,8 @@ Check nothing private went up. In PowerShell this must print nothing: `git ls-fi
 | `GOOGLE_CLIENT_SECRET` | from step 3 |
 
 Optional: `ALLOWED_EMAILS` (extra single addresses, comma separated; leave `ALLOWED_EMAIL_DOMAIN` empty to allow only these people),
-`CRAWL_PARALLEL_SITES` (how many websites are read at once; the container default is 8), `SESSION_SECRET` (32 or more random
-characters; if you skip it, one is made and kept on the volume). `HOST`, `PORT` and `DATA_DIR` are already set by the `Dockerfile`.
+`CRAWL_PARALLEL_SITES` (how many websites are read at once; the container default is 8), `SESSION_DAYS` (how many days a signed-in browser stays logged in via sliding renewal until clicking Sign out; default `30`), `SESSION_SECRET` (32 or more random
+characters; if you skip it, one is made and kept on the `/data` volume so logins survive restarts). `HOST`, `PORT` and `DATA_DIR` are already set by the `Dockerfile`.
 
 The **Ask** page (AI assistant) can be switched on in two ways. Either set `ANTHROPIC_API_KEY` here (and optionally `ASK_MODEL`,
 `ASK_MONTHLY_CAP_USD`), or set `ASK_ADMIN_EMAILS` to the email of the person who looks after the AI. That person then signs in and
