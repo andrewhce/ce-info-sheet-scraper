@@ -66,8 +66,9 @@ Optional: `ALLOWED_EMAILS` (extra single addresses, comma separated; leave `ALLO
 `CRAWL_PARALLEL_SITES` (how many websites are read at once; the container default is 8), `SESSION_SECRET` (32 or more random
 characters; if you skip it, one is made and kept on the volume). `HOST`, `PORT` and `DATA_DIR` are already set by the `Dockerfile`.
 
-The **Ask** page (AI assistant) is switched on by environment variables too, and cannot be changed from the page on a server:
-`ANTHROPIC_API_KEY` (and optionally `ASK_MODEL`, `ASK_MONTHLY_CAP_USD`). See [ASK.md](ASK.md), including what data goes to the AI service.
+The **Ask** page (AI assistant) can be switched on in two ways. Either set `ANTHROPIC_API_KEY` here (and optionally `ASK_MODEL`,
+`ASK_MONTHLY_CAP_USD`), or set `ASK_ADMIN_EMAILS` to the email of the person who looks after the AI. That person then signs in and
+pastes the key into an **AI settings · administrator only** box on the Ask page, and nobody else can see or change it. See [ASK.md](ASK.md), including what data goes to the AI service.
 
 The program refuses to start, and says why in the logs, if sign-in is not fully set up. That is on purpose.
 

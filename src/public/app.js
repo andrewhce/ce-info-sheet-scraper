@@ -1945,12 +1945,17 @@
       if (st.ready && !message) return h('span', { hidden: true });
       const box = h('details', { class: 'panel asksettings', open: true });
       box.append(h('summary', null, 'AI assistant status'));
-      box.append(h('p', { class: 'muted small' }, message || 'Ask is not connected on this server yet. Contact your dashboard admin to enable it.'));
+      box.append(h('p', { class: 'muted small' }, message || (st.sharedServer
+        ? 'Ask is not connected yet. Only the AI administrator can connect it. The administrator signs in with their own email and adds the API key here.' + (st.adminsSet ? '' : ' Nobody is set up as administrator yet: whoever runs the server adds the administrator’s email to the ASK_ADMIN_EMAILS setting.')
+        : 'Ask is not connected yet.')));
       return box;
     }
     const locked = st.locked || {};
     const box = h('details', { class: 'panel asksettings', open: !!message });
-    box.append(h('summary', null, st.ready ? 'AI settings' : 'Optional AI settings (not connected yet)'));
+    box.append(h('summary', null, (st.ready ? 'AI settings' : 'Optional AI settings (not connected yet)') + (st.sharedServer ? ' · administrator only' : '')));
+    if (st.sharedServer) {
+      box.append(h('p', { class: 'small' }, h('b', null, 'Only you can see this. '), 'You are signed in as the AI administrator. Other people on this dashboard cannot see or change these settings. The key you paste is saved on the server, never shown again (only its last four characters), and used only to answer questions on the Ask page.'));
+    }
     if (!st.ready) {
       box.append(h('p', { class: 'muted small' }, 'You do not need an AI key to load your sheet, check school websites, or download spreadsheets. Only fill this in if your team wants to ask questions on this page.'));
     }

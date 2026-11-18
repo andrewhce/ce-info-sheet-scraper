@@ -56,7 +56,7 @@ const rawCookie = (res, name) => (res.headers['set-cookie'] || []).find((c) => c
     setTimeout(() => reject(new Error('server did not start: ' + out)), 8000);
   });
   const PORT = 4491;
-  const server = await start(PORT);
+  const server = await start(PORT, { ASK_ADMIN_EMAILS: 'Boss@Example.edu' });   // the one person who may set the AI key
   const validClaims = (nonce, over = {}) => ({ iss: 'https://accounts.google.com', aud: 'test-client', exp: Math.floor(Date.now() / 1000) + 600, nonce, email: 'pat@example.edu', email_verified: true, hd: 'example.edu', name: 'Pat Lee', ...over });
   /** Runs the login and callback; returns the callback response. */
   const signIn = async (over, mutate) => {
@@ -147,6 +147,30 @@ const rawCookie = (res, name) => (res.headers['set-cookie'] || []).find((c) => c
     const good = sign({ email: 'pat@example.edu', exp: Math.floor(Date.now() / 1000) + 60 });
     r = await request(PORT, 'GET', '/api/overview', { headers: { cookie: 'session=' + good } }); assert.strictEqual(r.status, 200, 'a correctly signed cookie works');
     ok('a tampered, forged or expired session cookie is refused');
+
+    // the AI settings (the API key): only the administrator named in ASK_ADMIN_EMAILS may see or change them
+    {
+      const as = (email) => ({ cookie: 'session=' + sign({ email, exp: Math.floor(Date.now() / 1000) + 60 }), 'content-type': 'application/json', 'x-dashboard': '1' });
+      const KEY = 'sk-ant-api03-' + 'A'.repeat(40);
+      let a = await request(PORT, 'GET', '/api/ask/status', { headers: as('boss@example.edu') });
+      assert.strictEqual(JSON.parse(a.text).canEditSettings, true, 'the administrator may change the settings');
+      a = await request(PORT, 'GET', '/api/ask/status', { headers: as('pat@example.edu') });
+      assert.strictEqual(JSON.parse(a.text).canEditSettings, false, 'another company account may not');
+      assert.ok(!/boss/i.test(a.text), 'and is never told who the administrator is');
+      a = await request(PORT, 'POST', '/api/ask/settings', { headers: as('pat@example.edu'), body: JSON.stringify({ apiKey: KEY }) });
+      assert.strictEqual(a.status, 403, 'another company account cannot save a key');
+      a = await request(PORT, 'POST', '/api/ask/test', { headers: as('pat@example.edu'), body: '{}' });
+      assert.strictEqual(a.status, 403, 'or test the connection');
+      assert.ok(!fs.existsSync(path.join(tmp, 'agent-settings.json')), 'nothing was saved by the refused attempts');
+      a = await request(PORT, 'POST', '/api/ask/settings', { headers: as('boss@example.edu'), body: JSON.stringify({ apiKey: KEY }) });
+      assert.strictEqual(a.status, 200, 'the administrator can save the key: ' + a.text);
+      assert.ok(!a.text.includes(KEY.slice(12)), 'the key is not sent back');
+      assert.ok(fs.readFileSync(path.join(tmp, 'agent-settings.json'), 'utf8').includes(KEY), 'it is kept on the server');
+      a = await request(PORT, 'GET', '/api/ask/status', { headers: as('pat@example.edu') });
+      const seen = JSON.parse(a.text);
+      assert.ok(seen.ready === true && seen.canEditSettings === false && !a.text.includes(KEY.slice(12)), 'everyone can then use Ask, still without seeing the key or the settings');
+      ok('the AI key can be set only by the administrator email; other company accounts are refused and never see it');
+    }
 
     // actions still need the dashboard header, the right Host, and same-origin request headers
     assert.strictEqual(r.headers['x-frame-options'], 'DENY');

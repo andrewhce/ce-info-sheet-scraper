@@ -72,7 +72,8 @@ The `school-info-scraper` folder is **already a Git repository** connected to Gi
     Optional:
     - `ALLOWED_EMAILS`: extra single addresses, comma separated (for people outside the company domain).
     - `CRAWL_PARALLEL_SITES`: how many websites are read at once (default 8).
-    - `ANTHROPIC_API_KEY`: switches on the **Ask** page. See `docs/ASK.md` for what data goes to the AI service.
+    - `ASK_ADMIN_EMAILS`: the email of the person who may set the AI key from the **Ask** page (several can be listed with commas). That person signs in, opens **Ask**, and pastes the key into the **AI settings · administrator only** box. Nobody else can see it. If you leave this out, nobody can change the AI settings from the page.
+    - `ANTHROPIC_API_KEY`: the other way to switch on the **Ask** page, set here instead of in the box. See `docs/ASK.md` for what data goes to the AI service.
     - `SESSION_SECRET`: 32 or more random characters. If you skip it, one is made and kept on the volume.
 
 13. Railway redeploys. When the deploy shows **Active**, the service is up.

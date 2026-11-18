@@ -253,7 +253,7 @@ function startServer(port, dataDir) {
 
     // Regression: All dashboard routes render cleanly with zero null/undefined leaks, disable empty Run buttons, and handle 401 sign-in redirects
     const appSrc = fs.readFileSync(path.join(ROOT, 'src', 'public', 'app.js'), 'utf8');
-    async function renderRoute({ hash = '#/ask', webSearchOn = true, force401OnExport = false, blockedSchool = false, holdWorkbook = null } = {}) {
+    async function renderRoute({ hash = '#/ask', webSearchOn = true, force401OnExport = false, blockedSchool = false, holdWorkbook = null, askStatus = null } = {}) {
       const makeText = (s) => ({ nodeType: 3, textContent: String(s) });
       const appended = [];
       function makeNode(tag) {
@@ -384,6 +384,7 @@ function startServer(port, dataDir) {
               locked: { model: true, effort: true, costPolicy: true },
               anthropic: { configured: true, model: 'claude-sonnet-5-5', models: [{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (cheaper)' }] },
               groq: { configured: false, model: 'llama', models: ['llama'] },
+              ...(askStatus || {}),
             },
             '/api/ask/memory': { notes: [] },
             '/api/ask/sessions': { sessions: [] },
@@ -575,6 +576,22 @@ function startServer(port, dataDir) {
       await dl.settle();
       assert.ok(dl.calls.some((c) => c.url === '/api/export-spreadsheet'), 'the Excel file was asked for');
       ok('loading the sheet keeps going on other pages, shows a card, and never pulls the person back to Start here');
+    }
+
+    // The AI settings on a shared server: the administrator sees and edits them, everyone else only sees the status
+    {
+      const notConnected = { ready: false, anthropic: { configured: false, keyHint: null, keySource: null, model: 'claude-sonnet-5-5', models: [{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (cheaper)' }] }, locked: { model: true, effort: true, costPolicy: true }, sharedServer: true };
+      const admin = await renderRoute({ hash: '#/ask', askStatus: { ...notConnected, canEditSettings: true, adminsSet: true } });
+      const at = admin.walkText(admin.rootApp);
+      assert.ok(at.includes('administrator only') && at.includes('Only you can see this') && at.includes('Anthropic API key'), 'the administrator gets the key box, marked as for them only');
+      const other = await renderRoute({ hash: '#/ask', askStatus: { ...notConnected, canEditSettings: false, adminsSet: true } });
+      const ot = other.walkText(other.rootApp);
+      assert.ok(ot.includes('Only the AI administrator can connect it') && !ot.includes('Anthropic API key') && !ot.includes('Only you can see this'), 'everyone else sees a plain status and no key box');
+      const nobody = await renderRoute({ hash: '#/ask', askStatus: { ...notConnected, canEditSettings: false, adminsSet: false } });
+      assert.ok(nobody.walkText(nobody.rootApp).includes('ASK_ADMIN_EMAILS'), 'when no administrator is set up, it says how to set one up');
+      const mine = await renderRoute({ hash: '#/ask', askStatus: { ...notConnected, sharedServer: false, canEditSettings: true } });
+      assert.ok(!mine.walkText(mine.rootApp).includes('administrator only'), 'on a private computer nothing changes');
+      ok('Ask settings: the administrator sees the key box on a shared server, everyone else only the status, and a private computer is unchanged');
     }
 
     const barNoWeb = await renderRoute({ hash: '#/ask', webSearchOn: false });

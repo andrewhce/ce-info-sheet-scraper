@@ -78,8 +78,20 @@ Every question and answer, the tools it used and the estimated cost are appended
 
 ## On a server (online)
 
-Keys and the cap are set with environment variables and cannot be changed from the page (anyone who signs in could otherwise
-swap the company key): `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `ASK_PROVIDER` (`anthropic` or `groq`), `ASK_MODEL`,
+**Who can change the AI settings.** Only the signed-in people named in the `ASK_ADMIN_EMAILS` setting (one email, or several
+separated by commas). They see an **AI settings · administrator only** box on the Ask page where they can paste the API key,
+set the monthly cap and switch web search. Everyone else who signs in can use Ask but never sees the settings, the key or the
+list of administrators. The sign-in checks the email with Google, so nobody can pretend to be the administrator. If
+`ASK_ADMIN_EMAILS` is not set, nobody can change the settings from the page (the safe default).
+
+```
+ASK_ADMIN_EMAILS=you@yourcompany.com
+```
+
+A key pasted into the box is saved on the server's data volume (`data/agent-settings.json`, readable only by the program), is
+never shown again (only its last four characters), and is used only to answer questions on the Ask page. Settings can also still
+be set with environment variables, which win over the box (the box then shows them as set on the server and locked):
+`ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `ASK_PROVIDER` (`anthropic` or `groq`), `ASK_MODEL`,
 `ASK_GROQ_MODEL`, `ASK_MONTHLY_CAP_USD`, `ASK_WEB_SEARCH`. The questions and the data the tools return go to the AI service you choose, so decide
 what data may be sent before a second division's data is connected (customer details, leads and phone logs need a decision first).
 

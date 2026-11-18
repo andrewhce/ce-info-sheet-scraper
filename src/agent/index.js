@@ -28,10 +28,14 @@ function defaultClientFactory(apiKey) {
 
 const ownerOf = (user) => (user && (user.email || (user.local && 'local'))) || 'local';
 
+/** The emails that may change the AI settings on a shared server. They come from the ASK_ADMIN_EMAILS setting, never from the code. */
+const parseAdmins = (raw) => new Set(String(raw || '').toLowerCase().split(/[,;\s]+/).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)));
+
 /**
  * opts (all optional, for tests): deps { data, sheetExport }, settings, ledger, logFile (null for none),
  * memoryFile (null for in-memory), sessionsFile (null for in-memory), scopeGuard (false | custom classifier),
- * clientFactory(apiKey) -> Anthropic-like client, groqFactory(apiKey) -> provider.
+ * clientFactory(apiKey) -> Anthropic-like client, groqFactory(apiKey) -> provider, adminEmails (a list or comma separated text; default
+ * is the ASK_ADMIN_EMAILS setting).
  */
 function createAssistant(opts = {}) {
   const deps = opts.deps || {
@@ -69,6 +73,14 @@ function createAssistant(opts = {}) {
     : (opts.scopeGuard && typeof opts.scopeGuard.classify === 'function')
       ? opts.scopeGuard
       : (!isMocked ? defaultGuard : null);
+
+  // Who may change the AI settings (the API key, the cap, web search): the person at a private computer, or, on a shared server,
+  // only the signed-in people named in ASK_ADMIN_EMAILS. The sign-in checks the email with Google, so it cannot be typed in by someone else.
+  const adminEmails = parseAdmins(opts.adminEmails !== undefined ? (Array.isArray(opts.adminEmails) ? opts.adminEmails.join(',') : opts.adminEmails) : process.env.ASK_ADMIN_EMAILS);
+  const isAdmin = (user) => !!(user && (user.local || (user.email && adminEmails.has(String(user.email).toLowerCase()))));
+  const notAdmin = () => new AskError(adminEmails.size
+    ? 'Only the AI administrator can change the AI settings.'
+    : 'Nobody is set up to change the AI settings on this server yet. Whoever runs the server adds the administrator’s email to the ASK_ADMIN_EMAILS setting.', 403);
 
   const sessions = new Map();
   for (const saved of memory.allSessionsForHydration()) {
@@ -117,7 +129,9 @@ function createAssistant(opts = {}) {
     return {
       ...v,
       spentThisMonth: ledger.monthSpend(),
-      canEditSettings: !!(user && user.local),
+      canEditSettings: isAdmin(user),
+      sharedServer: !(user && user.local),          // true when the page is a shared server (not one person's own computer)
+      adminsSet: adminEmails.size > 0,              // whether anyone is set up as administrator (the emails themselves are never sent)
       sdkMissing: sdkMissing(),
       ready,
       webSearchOn: v.provider === 'anthropic' && v.webSearch,
@@ -128,7 +142,7 @@ function createAssistant(opts = {}) {
   }
 
   function saveSettings(user, body) {
-    if (!(user && user.local)) throw new AskError('On a shared server the AI settings are set by whoever runs the server (environment variables), not on this page.', 403);
+    if (!isAdmin(user)) throw notAdmin();
     try { settings.save(body); return status(user); } catch (e) {
       if (e instanceof SettingsError) throw new AskError(e.message, 400);
       throw e;
@@ -136,6 +150,7 @@ function createAssistant(opts = {}) {
   }
 
   async function testConnection(user) {
+    if (!isAdmin(user)) throw notAdmin();
     const cfg = settings.load();
     const provider = providerFor(cfg);
     try { return { ok: true, provider: cfg.provider, ...(await provider.test({ model: cfg.active.model })) }; } catch (e) { throw new AskError(redactSecrets(explainError(e)), 502); }

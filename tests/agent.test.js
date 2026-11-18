@@ -486,6 +486,32 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     assert.ok(/Connected/.test((await assistant.testConnection(local)).message));
     ok('assistant: not ready without a key, only the local person changes settings, the key is never echoed');
 
+    // On a shared server, only the signed-in people named in ASK_ADMIN_EMAILS may see or change the AI settings (the API key)
+    {
+      const adir = tmpDir();
+      const adminAssistant = createAssistant({ deps: fakeDeps(), settings: createSettings(path.join(adir, 's.json'), {}), ledger: createLedger(path.join(adir, 'u.jsonl')), logFile: null, clientFactory: () => sv.client, groqFactory: () => { throw new Error('not used'); }, adminEmails: ' Boss@Example.org , second@example.org ' });
+      const boss = { email: 'boss@example.org' }, shouty = { email: 'BOSS@EXAMPLE.ORG' }, second = { email: 'second@example.org' }, stranger = { email: 'pat@example.org' };
+      for (const who of [boss, shouty, second]) assert.strictEqual(adminAssistant.status(who).canEditSettings, true, `${who.email} is an administrator, whatever the capital letters`);
+      assert.strictEqual(adminAssistant.status(stranger).canEditSettings, false, 'another signed-in person cannot change the settings');
+      assert.strictEqual(adminAssistant.status(null).canEditSettings, false, 'nobody signed in cannot either');
+      assert.strictEqual(adminAssistant.status(stranger).sharedServer, true);
+      assert.ok(!/boss|second@/i.test(JSON.stringify(adminAssistant.status(stranger))), 'the administrators’ emails are never sent to other people');
+      assert.throws(() => adminAssistant.saveSettings(stranger, { apiKey: KEY }), (e) => e instanceof AskError && e.status === 403 && /Only the AI administrator/.test(e.message));
+      await assert.rejects(adminAssistant.testConnection(stranger), (e) => e instanceof AskError && e.status === 403, 'testing the connection spends money, so it is for administrators too');
+      let after = adminAssistant.saveSettings(boss, { apiKey: KEY });
+      assert.strictEqual(after.ready, true, 'the administrator can add the key');
+      const seenByOthers = adminAssistant.status(stranger);
+      assert.strictEqual(seenByOthers.ready, true, 'once the key is in, everyone can use Ask');
+      assert.strictEqual(seenByOthers.canEditSettings, false);
+      assert.ok(!JSON.stringify([after, seenByOthers]).includes(KEY.slice(12)), 'the key is never echoed to anyone');
+      const nobodyAssistant = createAssistant({ deps: fakeDeps(), settings: createSettings(path.join(tmpDir(), 's.json'), {}), ledger: createLedger(path.join(adir, 'u2.jsonl')), logFile: null, clientFactory: () => sv.client, adminEmails: '' });
+      assert.strictEqual(nobodyAssistant.status(boss).canEditSettings, false, 'with no administrator set up, nobody on a shared server can change the settings');
+      assert.strictEqual(nobodyAssistant.status(boss).adminsSet, false);
+      assert.throws(() => nobodyAssistant.saveSettings(boss, { apiKey: KEY }), (e) => e.status === 403 && /ASK_ADMIN_EMAILS/.test(e.message));
+      assert.strictEqual(nobodyAssistant.status({ local: true }).canEditSettings, true, 'a private computer is unchanged: the person at it can always set the key');
+      ok('assistant: on a shared server only the administrator emails can change the AI settings or test the connection; the list and the key are never shown');
+    }
+
     assert.throws(() => assistant.begin({ user: local, message: '   ' }), /Type a question/);
     assert.throws(() => assistant.begin({ user: local, message: 'x'.repeat(4001) }), /4000/);
     const events = [];
