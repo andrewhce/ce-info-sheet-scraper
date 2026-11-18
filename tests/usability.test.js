@@ -253,7 +253,7 @@ function startServer(port, dataDir) {
 
     // Regression: All dashboard routes render cleanly with zero null/undefined leaks, disable empty Run buttons, and handle 401 sign-in redirects
     const appSrc = fs.readFileSync(path.join(ROOT, 'src', 'public', 'app.js'), 'utf8');
-    async function renderRoute({ hash = '#/ask', webSearchOn = true, force401OnExport = false } = {}) {
+    async function renderRoute({ hash = '#/ask', webSearchOn = true, force401OnExport = false, blockedSchool = false } = {}) {
       const makeText = (s) => ({ nodeType: 3, textContent: String(s) });
       const appended = [];
       function makeNode(tag) {
@@ -348,12 +348,13 @@ function startServer(port, dataDir) {
             '/api/school': {
               school: { id: 'a', name: 'Alpha Academy', tier: 1, website: 'https://alpha.edu', tabs: ['Alpha'] },
               tabs: [{ tab: 'Alpha', matchedBy: 'exact' }], tabIndex: 0, urlChanged: true, previousStart: 'https://old-alpha.edu',
-              result: { status: 'ok', start: 'https://old-alpha.edu', scrapedAt: new Date().toISOString(), counts: { found: 1 }, pages: [], fields: {}, changes: [] },
+              result: { status: blockedSchool ? 'blocked' : 'ok', start: 'https://old-alpha.edu', scrapedAt: new Date().toISOString(), counts: { found: 1 }, pages: [], fields: {}, changes: [] },
               counts: { fills: 1, differs: 0, match: 0, both: 0, 'sheet-only': 0, none: 0 },
               rows: [{ kind: 'field', row: 5, key: 'tuition', hasRule: true, section: 'Tuition', label: 'Tuition:', verdict: 'fills', sheet: [], scraped: { status: 'found', value: '$40,000', confidence: 'high', sources: [] }, trust: { score: 71, level: 'medium', triage: 'check', needsReview: false, reasons: [{ text: 'Starts from how often tuition has agreed with your sheet.', effect: 0 }, { text: 'No school year shown next to the figure.', effect: -1.2 }] } }],
             },
             '/api/schedule': { enabled: false, frequency: 'weekly', scope: 'tier1', weekday: 1, time: '02:00', windowsTask: { supported: false } },
             '/api/verify': {},
+            '/api/manual-pages': { site: 'alpha.edu', pages: [{ id: 'p1', name: 'tuition.html', url: 'https://alpha.edu/tuition', urlFrom: 'page', title: 'Tuition', kind: 'html', bytes: 2048, chars: 900, addedAt: '2026-11-17T00:00:00Z' }], max: 60 },
             '/api/review-queue': {
               ready: true, facts: 4, readyToUse: 2, checked: 0, needLook: 2, skippedWrongSite: 0, truncated: false,
               byField: [{ key: 'enrollment', label: 'Total enrollment:', n: 1 }, { key: 'tuition', label: 'Tuition:', n: 1 }],
@@ -393,7 +394,7 @@ function startServer(port, dataDir) {
       vm.runInNewContext(appSrc, ctx, { filename: 'src/public/app.js' });
       for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
       const walkText = (n) => (n.nodeType === 3 ? n.textContent : (n.children || []).map(walkText).join('|'));
-      return { rootApp, walkText, buttons: () => allByTag(rootApp, 'BUTTON'), location, calls };
+      return { rootApp, walkText, buttons: () => allByTag(rootApp, 'BUTTON'), links: () => allByTag(rootApp, 'A'), location, calls, doc: ctx.document };
     }
     for (const [hsh, expectText] of [
       ['#/ask', 'New chat'],
@@ -462,6 +463,66 @@ function startServer(port, dataDir) {
         assert.ok(!res.walkText(settingsEl).includes('|Model|'), 'Locked Model select must be omitted from AI settings');
       }
     }
+    // The colour key: what the colours in the Google Sheet file and the Excel file mean, shown on Help and next to the buttons that make the files
+    {
+      const swatchColours = (n) => { const out = []; const walk = (x) => { if (x.nodeType === 1 && /\bswatch\b/.test(x.className || '') && x.style.background) out.push(x.style.background.toLowerCase()); (x.children || []).forEach(walk); }; walk(n); return out; };
+      const gsSrc = fs.readFileSync(path.join(ROOT, 'google-sheet', 'Code.gs'), 'utf8');
+      const xlSrc = fs.readFileSync(path.join(ROOT, 'src', 'lib', 'spreadsheet-export.js'), 'utf8');
+      const yellow = /FILLED_COLOR:\s*'(#[0-9a-f]{6})'/i.exec(gsSrc)[1].toLowerCase(), orange = /UPDATE_COLOR:\s*'(#[0-9a-f]{6})'/i.exec(gsSrc)[1].toLowerCase();
+      const fill = (k) => '#' + new RegExp(`${k}: 'FF([0-9A-F]{6})'`).exec(xlSrc)[1].toLowerCase();
+      const help = await renderRoute({ hash: '#/help/colours' });
+      const ht = help.walkText(help.rootApp);
+      assert.ok(ht.includes('What the colours mean in your Google Sheet and Excel files') && ht.includes('School Info → Load export file…') && ht.includes('How They Compare'), 'Help explains the colours of both files');
+      for (const word of ['Yellow:', 'Orange:', 'Blue:', 'Green:', 'No colour:']) assert.ok(ht.includes(word), `the key names ${word}`);
+      assert.deepStrictEqual(swatchColours(help.rootApp), [yellow, orange, fill('fills'), fill('differs'), fill('match')], 'the swatches are exactly the colours the Google Sheet script and the Excel file really use');
+      assert.ok(ht.includes('Jump to:') && help.links().some((a) => a.attrs.href === '#/help/colours'), 'Help has a jump-to menu for its sections');
+      assert.ok(help.doc.title.startsWith('Help'), 'the browser tab is named after the page');
+      const school = await renderRoute({ hash: '#/school/a' });
+      const st = school.walkText(school.rootApp);
+      assert.ok(st.includes('What do the colours in the Google Sheet and Excel files mean?') && swatchColours(school.rootApp).length === 5, 'a school page shows the colour key beside its download buttons');
+      assert.ok(school.links().some((a) => a.attrs.href === '#/help/colours'), 'and links to the full explanation');
+      assert.ok(school.doc.title.startsWith('Alpha Academy'), 'a school page names the browser tab after the school');
+      const start = await renderRoute({ hash: '#/start' });
+      assert.ok(start.walkText(start.rootApp).includes('What do the colours in the Google Sheet and Excel files mean?'), 'Start here shows the colour key next to the downloads');
+      ok('the colour key on Help, school pages and Start here uses exactly the colours the Google Sheet script and the Excel file really use');
+    }
+
+    // Easier to follow: a next-step card, a Schools table that fits, and links from each page to the part of Help that explains it
+    {
+      const schools = await renderRoute({ hash: '#/' });
+      const t = schools.walkText(schools.rootApp);
+      assert.ok(t.includes('All done: every school is checked'), 'a next-step card says what to do next (everything checked here)');
+      const headers = []; const walkTh = (n) => { if (n.tagName === 'TH') headers.push(schools.walkText(n).replace(/\|/g, '').trim()); (n.children || []).forEach(walkTh); }; walkTh(schools.rootApp);
+      assert.ok(headers.includes('Last checked') && !headers.includes('Website') && !headers.includes('Sent to Google Sheet'), 'the table drops the two columns that pushed it off the screen: ' + headers.join(','));
+      assert.ok(t.includes('Website:') && t.includes('alpha.edu') && t.includes('link changed'), 'the website and link warnings sit under the school name');
+      assert.ok(schools.links().some((a) => a.attrs.href === '#/help/status'), 'Schools links to what its labels mean');
+      const review = await renderRoute({ hash: '#/review' });
+      assert.ok(review.links().some((a) => a.attrs.href === '#/help/ratings'), 'To check links to what the ratings mean');
+      assert.ok(review.rootApp.querySelector('.whycol'), 'the Why column has its own width so it is not squeezed');
+      const empty = await renderRoute({ hash: '#/start' });
+      assert.ok(empty.rootApp.querySelector('.nextstep'), 'Start here shows the next-step card');
+      ok('next-step card, a Schools table without the two off-screen columns, Help links on each page, and a wider Why column');
+    }
+
+    // A website that refuses automatic reading: the school page explains the way forward and takes pages the person saved by hand
+    {
+      const blocked = await renderRoute({ hash: '#/school/a', blockedSchool: true });
+      const bt = blocked.walkText(blocked.rootApp);
+      const panel = blocked.rootApp.querySelector('.savedpages');
+      assert.ok(panel && 'open' in panel.attrs, 'the saved-pages panel is open on a blocked school');
+      assert.ok(bt.includes('does not let the dashboard in') && bt.includes('Ctrl + S') && bt.includes('Webpage, Complete') && bt.includes('Read these pages'), 'it explains how to save the pages and read them');
+      assert.ok(bt.includes('does not try to get around it') && !/bypass|workaround|evade/i.test(bt), 'it says plainly that the dashboard does not get around the security check');
+      assert.ok(bt.includes('Tuition') && bt.includes('Remove'), 'pages already saved are listed, each with Remove');
+      assert.ok(blocked.calls.some((c) => c.url === '/api/manual-pages' && c.method === 'GET'), 'the saved pages are loaded from the server');
+      assert.ok(blocked.links().some((a) => a.attrs.href === '#/help/blocked'), 'and it links to the Help section about blocked websites');
+      const normal = await renderRoute({ hash: '#/school/a' });
+      assert.ok(!normal.rootApp.querySelector('.savedpages'), 'a school that was read normally does not show the panel');
+      const help = await renderRoute({ hash: '#/help/blocked' });
+      const ht = help.walkText(help.rootApp);
+      assert.ok(ht.includes('A school’s website will not let the dashboard in') && ht.includes('SchoolInfoSheetBot/1.0') && ht.includes('Could your web team allow that name'), 'Help explains the two ways forward and gives a message to send the school');
+      ok('a blocked school page explains how to save the pages by hand, lists them, and never suggests getting around the check');
+    }
+
     const barNoWeb = await renderRoute({ hash: '#/ask', webSearchOn: false });
     const barNoWebTxt = barNoWeb.walkText(barNoWeb.rootApp.querySelector('.askbar'));
     assert.ok(barNoWebTxt.includes('New chat') && !/\bnull\b/i.test(barNoWebTxt));

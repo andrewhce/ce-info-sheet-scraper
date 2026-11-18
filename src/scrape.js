@@ -18,6 +18,7 @@ const { crawlSite, cleanStart } = require('./lib/crawl');
 const { extractSchool } = require('./lib/rules');
 const { siteIdentity } = require('./lib/identity');
 const { diffFields } = require('./lib/changes');
+const { keepSavedPages } = require('./lib/manual-pages');
 const scheduler = require('./lib/scheduler');
 const { createSlack } = require('./lib/slack');
 
@@ -162,6 +163,17 @@ async function main() {
         crawl = { status: 'error', detail: e.message, start, pages: [], portals: [], skipped: [] };
       }
       for (const s of schools) {
+        // a website that still refuses automatic reading must not wipe out answers read from pages a person saved by hand
+        const savedFile = path.join(PATHS.resultsDir, s.id + '.json');
+        const saved = readJson(savedFile, null);
+        if (keepSavedPages(saved, crawl)) {
+          writeJson(savedFile, { ...saved, lastAttempt: { at: new Date().toISOString(), status: crawl.status, detail: crawl.detail } });
+          doneSchools++;
+          const n = saved.counts || { found: 0, none: 0 };
+          emit({ type: 'school-done', id: s.id, name: s.name, status: 'ok', detail: 'the website still refuses automatic reading, so the answers read from pages saved by hand were kept',
+            found: n.found, total: n.found + n.none, changesCount: 0, changes: [], wrongSite: false, done: doneSchools, of: targets.length });
+          continue;
+        }
         let fields = {};
         if (crawl.status === 'ok') {
           try { fields = extractSchool(s, crawl, now); } catch (e) { crawl = { ...crawl, status: 'error', detail: 'rules failed: ' + e.message }; }

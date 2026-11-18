@@ -7,13 +7,20 @@
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
+/* Dark colours apply when the computer is set to dark, unless the person chose Light; or when they chose Dark. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme=light]) {
     --bg: #151412; --panel: #1e1c19; --ink: #ece8e1; --muted: #a39d92; --line: #312f2a; --line-strong: #47443d;
     --accent: #e57886; --accent-ink: #1a0d10;
     --ok: #74d3a0; --ok-bg: #17301f; --warn: #e8b862; --warn-bg: #3a2c10; --info: #86b9f2; --info-bg: #14273d;
     --bad: #f29393; --bad-bg: #3b1a1a; --mute-bg: #2a2824;
   }
+}
+:root[data-theme=dark] {
+  --bg: #151412; --panel: #1e1c19; --ink: #ece8e1; --muted: #a39d92; --line: #312f2a; --line-strong: #47443d;
+  --accent: #e57886; --accent-ink: #1a0d10;
+  --ok: #74d3a0; --ok-bg: #17301f; --warn: #e8b862; --warn-bg: #3a2c10; --info: #86b9f2; --info-bg: #14273d;
+  --bad: #f29393; --bad-bg: #3b1a1a; --mute-bg: #2a2824;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -376,3 +383,57 @@ th.chkcol, td.chkcol { width: 34px; padding-right: 6px; text-align: center; }
 .glossary dt { font-weight: 600; margin: 0; }
 .glossary dd { margin: 0; line-height: 1.45; }
 @media (max-width: 640px) { .glossary { grid-template-columns: 1fr; gap: 2px; } .glossary dd { margin-bottom: 10px; } }
+
+/* ---- Friendlier reading: colour key, next-step card, jump menu, readable small print, tables that fit ---- */
+.helplink { white-space: nowrap; }
+.toc { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 18px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 14px; }
+.toc a { text-decoration: none; padding: 4px 11px; border-radius: 999px; background: var(--mute-bg); color: var(--ink); }
+.toc a:hover { background: var(--ink); color: var(--bg); }
+.colourkey .ckgroup { margin: 0 0 14px; }
+.colourkey h3 { margin: 0 0 8px; }
+.colourkey ul { list-style: none; margin: 0; padding: 0; }
+.colourkey li { display: flex; gap: 12px; align-items: flex-start; margin: 0 0 8px; line-height: 1.45; }
+.swatch { flex: none; width: 30px; height: 22px; margin-top: 1px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, .3); }
+.swatch.none { background: transparent; border-style: dashed; border-color: var(--line-strong); }
+.colourdetails { margin: 12px 0; background: var(--panel); }
+.colourdetails .colourkey { margin-top: 10px; }
+.nextstep { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin: 0 0 18px; padding: 14px 18px; border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 10px; background: var(--panel); }
+.nextstep .ns-text { flex: 1 1 320px; min-width: 0; }
+.nextstep .ns-text b { display: block; font-size: 17px; }
+.nextstep .ns-text span { display: block; margin-top: 2px; color: var(--muted); }
+.viewopts { display: flex; gap: 6px; margin-left: auto; flex: none; }
+.viewopts .btn { height: 30px; padding: 0 10px; font-size: 13px; }
+.jobpill:not([hidden]) ~ .viewopts, .who:not([hidden]) ~ .viewopts { margin-left: 12px; }
+/* the top menu wraps onto a second line when the text is big or the window is narrow, instead of squeezing or clipping */
+.top { height: auto; min-height: 56px; flex-wrap: wrap; overflow: visible; gap: 0 20px; }
+.tabs { height: auto; flex-wrap: wrap; }
+.tabs a { white-space: nowrap; min-height: 56px; }
+.viewopts { padding: 10px 0; }
+@media (max-width: 1100px) { .brand span { display: none; } }
+@media (max-width: 700px) { .top { position: static; } }   /* on a phone the menu scrolls away instead of covering the screen */
+
+/* nothing is smaller than 13px, and the small print is a little bigger */
+.small, .note, .src, .why, .verify, .vbtn, .appfoot, .crumb, .field span, .check-item .sub, .check-item .next, .meta, .filters button, .eta, .guidance, .active, .pick-summary { font-size: 14px; }
+details { font-size: 14px; }
+.chip { font-size: 13px; }
+.trust { font-size: 13.5px; }
+.conf, .cell .tag, .frow .label .rownum, .ask-thread-meta, .files button span { font-size: 13px; }
+td .sub, .stat span, .stat-btn span, .copybtn, .msg-meta { font-size: 13.5px; }
+thead th, .colhead { font-size: 12.5px; }
+.evidence, .log, pre.code, .mono { font-size: 13px; }
+
+/* tables fit a normal screen: headings wrap instead of forcing a sideways scroll */
+thead th { white-space: normal; vertical-align: bottom; line-height: 1.25; }
+th.num { white-space: normal; }
+th, td { padding: 10px 10px; }
+td.name { min-width: 230px; }
+td.name .sub { margin-top: 2px; }
+.meter { width: 44px; margin-right: 6px; }
+.savedlist { list-style: none; margin: 10px 0 0; padding: 0; }
+.savedlist li { padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.savedlist li .sub { margin-top: 2px; }
+.savedpages ol { margin: 8px 0 12px; padding-left: 22px; }
+.savedpages ol li { margin-bottom: 6px; }
+blockquote.letter { margin: 10px 0 0; padding: 12px 16px; border-left: 4px solid var(--line-strong); background: var(--mute-bg); border-radius: 0 8px 8px 0; user-select: all; }
+td.whycol { min-width: 260px; }
+td.val { max-width: 260px; }

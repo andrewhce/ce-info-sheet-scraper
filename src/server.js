@@ -22,6 +22,7 @@ const auth = require('./auth');
 const { createAssistant, AskError } = require('./agent');
 const { createVerification, VerificationError } = require('./lib/verification');
 const reviewQueue = require('./lib/review-queue');
+const manualPages = require('./lib/manual-pages');   // pages a person saved by hand, for websites that refuse automatic reading
 
 const cfg = loadConfig();
 const verification = createVerification({ data });   // spot-checks and the accuracy figures built from them
@@ -237,6 +238,35 @@ async function receiveWorkbook(req, res) {
 }
 
 /** A teammate's results file: checked and added. A school's result is only ever replaced by a newer one. */
+function schoolById(id) {
+  const list = data.getSchools();
+  const s = list && list.schools.find((x) => x.id === String(id || ''));
+  if (!s) throw new manualPages.ManualPagesError('That school was not found. Load your School Information Sheet first.');
+  return s;
+}
+
+/** One page the person saved from the school's website arrives as the raw request body (see lib/manual-pages.js). */
+async function receiveSavedPage(req, res, user, url) {
+  const MAX = manualPages.MAX_FILE_BYTES;
+  const chunks = [];
+  let size = 0, tooBig = false;
+  await new Promise((resolve, reject) => {
+    req.on('data', (c) => { size += c.length; if (size > MAX) tooBig = true; else chunks.push(c); });
+    req.on('end', resolve); req.on('error', reject);
+  }).catch(() => { tooBig = null; });
+  if (tooBig === null) return send(res, 400, { error: 'The upload was interrupted. Please try again.' });
+  if (tooBig) return send(res, 413, { error: 'That file is bigger than 15 MB.' });
+  try {
+    const school = schoolById(url.searchParams.get('school'));
+    const entry = await manualPages.addFile({ school, name: url.searchParams.get('name') || 'page', bytes: Buffer.concat(chunks), url: url.searchParams.get('page') || '' });
+    audit(user, `added a saved page for ${school.name}: ${entry.name}`);
+    return send(res, 200, entry);
+  } catch (e) {
+    if (e instanceof manualPages.ManualPagesError) return send(res, 422, { error: e.message });
+    throw e;
+  }
+}
+
 async function receiveResults(req, res, user) {
   const MAX = 100 * 1024 * 1024;
   const chunks = [];
@@ -280,8 +310,24 @@ const server = http.createServer(async (req, res) => {
       if (req.headers['x-dashboard'] !== '1') return send(res, 403, { error: 'forbidden' });
       if (p === '/api/workbook') { audit(user, 'is loading a new School Information Sheet'); return await receiveWorkbook(req, res); }
       if (p === '/api/results-package') return await receiveResults(req, res, user);
+      if (p === '/api/manual-pages') return await receiveSavedPage(req, res, user, url);
       if (!/^application\/json/i.test(req.headers['content-type'] || '')) return send(res, 403, { error: 'forbidden' });
       const body = await readBody(req);
+      // ---- pages saved by hand, for websites that refuse automatic reading ----
+      if (p === '/api/manual-pages/remove' || p === '/api/manual-pages/build') {
+        try {
+          const school = schoolById(body.school);
+          if (p === '/api/manual-pages/remove') { manualPages.remove(school, body.id); audit(user, `removed a saved page for ${school.name}`); return send(res, 200, manualPages.list(school)); }
+          if ((job && job.running) || externalRun()) return send(res, 409, { error: 'Wait for the running check to finish first.' });
+          const out = await manualPages.build({ school, schools: data.getSchools().schools });
+          data.clearCache();
+          audit(user, `read ${out.pages} saved pages for ${school.name} (${out.schools.length} school${out.schools.length === 1 ? '' : 's'})`);
+          return send(res, 200, out);
+        } catch (e) {
+          if (e instanceof manualPages.ManualPagesError) return send(res, 422, { error: e.message });
+          throw e;
+        }
+      }
       // ---- spot-checks and accuracy ----
       if (p === '/api/verify' || p === '/api/accuracy/sample' || p === '/api/accuracy/sample-clear') {
         try {
@@ -508,6 +554,12 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/me') return send(res, 200, { email: user.email, name: user.name, local: !!user.local });
     if (p === '/api/ask/status') return send(res, 200, assistant.status(user));
     if (p === '/api/verify') return send(res, 200, verification.forSchool(String(url.searchParams.get('school') || '')));
+    if (p === '/api/manual-pages') {
+      try { return send(res, 200, manualPages.list(schoolById(url.searchParams.get('school')))); } catch (e) {
+        if (e instanceof manualPages.ManualPagesError) return send(res, 422, { error: e.message });
+        throw e;
+      }
+    }
     if (p === '/api/accuracy') return send(res, 200, { report: verification.report(), sample: verification.sampleProgress() });
     if (p === '/api/review-queue') {
       const q = url.searchParams;

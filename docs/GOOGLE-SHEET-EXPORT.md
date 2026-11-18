@@ -47,7 +47,8 @@ opens the menu inside the sheet, as that person.
    the same file again.
 4. The people named in `NOTIFY_EMAILS` get one email a day listing the schools that were loaded. Each school's tab has yellow cells
    (filled from the website) and orange cells (the website said something different, see the note). Tick **Reviewed?** in the Export
-   Log when a school has been checked.
+   Log when a school has been checked. The dashboard's **Help** page (the "colours" section) has the same colour key, with the Excel
+   download's colours too, and each school page shows it next to the download buttons.
 
 After editing the script later, paste the new `Code.gs` over the same `School Info Export` file and Save. (Nothing to redeploy for the
 menu route.)

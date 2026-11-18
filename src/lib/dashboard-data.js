@@ -208,6 +208,8 @@ function schoolPayload(id, tabIndex = 0, opts) {
       identity: result.identity || null,
       changes: Array.isArray(result.changes) ? result.changes : [],
       changedAt: result.changedAt || null,
+      // answers read from pages a person saved by hand (for a website that refuses automatic reading)
+      source: result.source || null, savedPages: result.savedPages || null, lastAttempt: result.lastAttempt || null,
     } : null,
     rows: cmp.rows, counts: cmp.counts, trustCounts: cmp.trustCounts,
   };

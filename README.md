@@ -10,7 +10,7 @@ assistant that only reads what the scraper saved and answers questions about it 
 
 1. Double-click **`Start Dashboard.cmd`**. The dashboard opens quietly in your browser (no black command window stays open; use **Turn off dashboard** at the bottom of the page when you are done, or run `Start Dashboard.cmd --console` to view live console output). The first time it installs dependencies automatically. If Node.js is missing it opens the download page: install the "LTS" version, then double-click again.
 2. On **Start here**, follow Step 1 to drop in your School Information Sheet as an Excel file (in Google Sheets: File → Download → Microsoft Excel (.xlsx)). Do this again whenever the sheet changes.
-3. On **Check websites**, choose **Tier 1**, then press **Start checking** (about an hour for 65 schools; keep the PC awake). Choosing a group only selects it: nothing starts until you press Start checking. Then open **Schools** to look at the answers, copy them, or download Excel (`.xlsx`) / CSV spreadsheets. New to the dashboard? Open **Help** (top right) for a plain-words guide to every label and colour.
+3. On **Check websites**, choose **Tier 1**, then press **Start checking** (a big group can take an hour or more; keep the PC awake). Choosing a group only selects it: nothing starts until you press Start checking. Then open **Schools** to look at the answers, copy them, or download Excel (`.xlsx`) / CSV spreadsheets. New to the dashboard? Open **Help** (top right) for a plain-words guide to every label and colour.
 
 Something not working? Double-click **`Check Setup.cmd`**: it lists what is ready and what still needs doing, in plain words.
 The same list is shown on **Start here** if anything still needs attention.
@@ -24,7 +24,7 @@ The same list is shown on **Start here** if anything still needs attention.
 | **To check** | The researcher's work list. Every main fact gets a rating out of 100 (**Safe to use**, **Quick look** or **Check this**) from where it came from and how clearly the website says it, never from your sheet. Only the answers the dashboard is unsure about are listed, least certain first, so nobody re-reads answers that are almost certainly right (see [docs/TRUST.md](docs/TRUST.md)). |
 | **Check websites** | Choose Tier 1, 2, 3, schools not checked yet, or all schools, then press **Start checking** (choosing alone never starts a run); set up an **automatic schedule**; and connect **Slack notifications**, which list every changed answer of every updated school in full (nothing is cut off), numbered when long, and warn when a school's website link looks like a different school. |
 | **Accuracy** | How often the answers are actually right: pick a list of schools, mark each answer **✓ Right** or **✗ Wrong** on the school page, and see the results per question (see [docs/ACCURACY.md](docs/ACCURACY.md)). |
-| **Help** | A plain-words guide: what the dashboard is for, a quick guide, and what every label, colour and status means. |
+| **Help** | A plain-words guide with a jump-to menu: what the dashboard is for, a quick guide, the ratings, **what the yellow, orange, blue and green cells in the Google Sheet and Excel files mean**, and what every label and status means. Other pages link to the right part (for example #/help/colours). |
 | **Ask** | Optional AI assistant to ask questions about school data in plain English (only needed if connected with a Claude or Groq key). |
 | **Technical details & code** | Footer link at the bottom of any page showing the source code and extraction rules in plain view. |
 
@@ -56,6 +56,7 @@ precious except `results/` (what the scraper found). `data/cache/` only saves ti
 
 ## Guides
 
+- [docs/BLOCKED-SITES.md](docs/BLOCKED-SITES.md): what to do when a school's website shows a security check and refuses the dashboard (today: Harvard-Westlake). The dashboard never works around the check: a person saves the pages in their own browser and adds the files on the school's page, or asks the school to allow the dashboard. Includes a message to send the school.
 - [docs/RAILWAY-STEP-BY-STEP.md](docs/RAILWAY-STEP-BY-STEP.md): click-by-click steps to test the dashboard online on Railway (GitHub, a volume, Google sign-in, the settings, and what to check). The longer reference is [docs/ONLINE-SETUP.md](docs/ONLINE-SETUP.md).
 - [docs/INSTALL-STEP-BY-STEP.md](docs/INSTALL-STEP-BY-STEP.md): plain-language, click-by-click steps for teammates to install and start using the dashboard on their own Windows computer (hand this to them with the zip).
 - [docs/TEAM-SETUP.md](docs/TEAM-SETUP.md): give the program to teammates as a folder they unzip and double-click (nothing to install, no server), and share results between computers.
@@ -67,3 +68,9 @@ precious except `results/` (what the scraper found). `data/cache/` only saves ti
 - [docs/ASK.md](docs/ASK.md): the Ask page: connect an API key, what the assistant can and cannot do, cost and the monthly cap, what it records.
 - [docs/GOOGLE-SHEET-EXPORT.md](docs/GOOGLE-SHEET-EXPORT.md): send a school's findings into a copy of your Google Sheet for a person to fact check (download a file, load it from the sheet's School Info menu).
 - [docs/DEPLOY-GUIDE.md](docs/DEPLOY-GUIDE.md): a showcase script for your boss, and putting a read-only copy online (set aside for now).
+
+## Easier to read (top right of every page)
+
+- **A− / A+** make the text smaller or bigger, and **Light / Dark** switches the page colours. Both are remembered on that computer.
+- A **next step** card on Start here and Schools says the one thing to do next (load the sheet, check schools, look at the answers it is unsure about, or download).
+- The Schools table fits a normal screen: the website link and "sent to Google Sheet" time sit under each school's name.

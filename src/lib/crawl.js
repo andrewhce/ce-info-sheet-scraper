@@ -291,4 +291,42 @@ async function crawlSite(startUrl, fetcher, cfg, emit = () => {}) {
   return out('ok', null);
 }
 
-module.exports = { crawlSite, TOPICS, PORTALS, cleanStart };
+/**
+ * The same kind of result a crawl gives, built from pages a person saved by hand (Ctrl+S in their own browser).
+ * This is for websites that refuse automatic reading: nothing here contacts the website or works around its protection.
+ * @param {string} startUrl the school's website
+ * @param {object[]} records page records (ok:true, finalUrl, kind, blocks, links, ...) made by lib/manual-pages.js
+ */
+function crawlFromPages(startUrl, records) {
+  const start = cleanStart(startUrl);
+  const domain = baseDomain(new URL(start).hostname);
+  const pages = new Map();
+  const portals = new Map();
+  for (const rec of records) {
+    if (!rec || !rec.ok || pages.has(rec.finalUrl)) continue;
+    if (rec.kind === 'pdf') {
+      rec.topics = ['pdf', ...TOPICS.filter((t) => t.text.test(rec.linkText || rec.title || '') || t.path.test(rec.finalUrl.replace(/[-_]/g, ' '))).map((t) => t.key)];
+    } else {
+      rec.topics = tagPage(rec, []);
+    }
+    pages.set(rec.finalUrl, rec);
+    for (const l of rec.links || []) {
+      let u; try { u = new URL(l.url); } catch { continue; }
+      const portal = PORTALS.find(([, re]) => re.test(u.hostname));
+      if (portal) {
+        const key = u.hostname + u.pathname;
+        if (!portals.has(key)) portals.set(key, { name: portal[0], url: l.url, linkText: l.text, foundOn: rec.finalUrl });
+      } else if (baseDomain(u.hostname) !== domain && /^(apply|admissions?|portal|enroll)\./i.test(u.hostname) && !portals.has(u.hostname)) {
+        portals.set(u.hostname, { name: 'Application site', url: l.url, linkText: l.text, foundOn: rec.finalUrl });
+      }
+    }
+  }
+  const out = (status, detail) => ({ status, detail: detail || null, start, pages: [...pages.values()], portals: [...portals.values()], skipped: [] });
+  if (!pages.size) return out('error', 'none of the saved pages could be read');
+  const textChars = [...pages.values()].reduce((n, p) => n + (p.mainChars || 0), 0);
+  // a person chose these pages on purpose, so even one short page is fine; only a nearly empty set is refused
+  if (textChars < 200) return out('thin', 'the saved pages hold almost no text. Save the pages again after they have finished loading.');
+  return out('ok', null);
+}
+
+module.exports = { crawlSite, crawlFromPages, TOPICS, PORTALS, cleanStart };

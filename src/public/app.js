@@ -167,7 +167,7 @@
     thin: ['Nothing readable', 'warn'], robots: ['Website asks not to be read', 'warn'], 'no-website': ['No website link', 'bad'],
   };
   const STATUS_HELP = {
-    blocked: 'This website stops automatic readers. Open the school’s website yourself to fill in the missing answers.',
+    blocked: 'This website stops automatic readers, and the dashboard respects that. You can still use it: open the school’s pages in your own browser, save them, and add the files on this school’s page.',
     thin: 'This website shows its content in a way the dashboard cannot read. Open the school’s website yourself to check.',
     robots: 'This website asks automatic programs not to read it, and the dashboard respects that. Open the school’s website yourself to check.',
     error: 'The dashboard could not open this website. Check that the website link in your sheet still works.',
@@ -183,6 +183,58 @@
     low: 'Please double-check',
   };
   const chip = (pair, title) => h('span', { class: 'chip ' + (pair[1] || ''), title: title || null }, pair[0]);
+
+  /** A small "what does this mean?" link to a section of the Help page. */
+  const helpLink = (section, text) => h('a', { class: 'helplink', href: '#/help/' + section }, text || 'What does this mean?');
+
+  // The colours in the files this dashboard makes. The hex values are the real cell colours used by
+  // google-sheet/Code.gs (the Google Sheet file) and src/lib/spreadsheet-export.js (the Excel file).
+  const COLOUR_GROUPS = [
+    { title: 'In your Google Sheet, after School Info → Load export file…', rows: [
+      ['#fff2cc', 'Yellow', 'The cell was blank, and the answer was filled in from the school’s website. Point at the cell to read its note: which page the answer came from and how sure the dashboard was. (A small dark triangle in the cell’s corner means it has a note.)'],
+      ['#fce5cd', 'Orange', 'The cell already had a different answer, so nothing was overwritten. The website’s answer is in the cell’s note, so you can decide which one is right.'],
+      [null, 'No colour', 'Your sheet already says the same thing, or the website had nothing to add. Nothing was changed.'],
+    ], foot: 'A cell that already has a colour of its own keeps that colour, but it still gets the note. Every load is also listed on the “Export Log” tab of your sheet.' },
+    { title: 'In the Excel file (the “How They Compare” column)', rows: [
+      ['#e2eefb', 'Blue', 'Your sheet is empty here and the website has an answer, so it can fill the blank.'],
+      ['#fce5cd', 'Orange', 'The website and your sheet say different things. Open the school’s page to see which is right.'],
+      ['#e3f3ea', 'Green', 'The website and your sheet say the same thing.'],
+      [null, 'No colour', 'Anything else: both have an answer but in different words, only your sheet has one, or nobody has one.'],
+    ] },
+  ];
+  /** The colour key. `compact` is the short version shown next to the buttons that make the files. */
+  function colourKey(compact) {
+    return h('div', { class: 'colourkey' }, COLOUR_GROUPS.map((g) => h('div', { class: 'ckgroup' },
+      h('h3', null, g.title),
+      h('ul', null, g.rows.map(([hex, name, text]) => {
+        const sw = h('span', { class: 'swatch' + (hex ? '' : ' none'), 'aria-hidden': 'true' });
+        if (hex) sw.style.background = hex;   // set from script: the page's security policy blocks inline style attributes
+        return h('li', null, sw, h('span', null, h('b', null, name + ': '), compact ? text.split('. ')[0].replace(/\.$/, '') + '.' : text));
+      })),
+      !compact && g.foot ? h('p', { class: 'muted small' }, g.foot) : null)),
+    compact ? h('p', { class: 'small' }, helpLink('colours', 'Full explanation on the Help page')) : null);
+  }
+  /** The colour key folded away under a short question, for the pages that make these files. */
+  const colourDetails = () => h('details', { class: 'guide colourdetails' },
+    h('summary', null, 'What do the colours in the Google Sheet and Excel files mean?'), colourKey(true));
+
+  /** Tells the person the one thing to do next, from what has been done so far. */
+  function nextStepCard() {
+    const ov = S.ov;
+    if (STATIC || !ov) return null;
+    const running = !!(S.job && S.job.running);
+    const scraped = ov.ready ? ov.schools.filter((s) => s.status === 'ok') : [];
+    const notChecked = ov.ready ? ov.schools.filter((s) => s.status === 'not-scraped').length : 0;
+    const look = scraped.filter((s) => !s.wrongSite).reduce((n, s) => n + (s.look || 0), 0);   // the same count the To check list shows (it leaves out wrong-website schools)
+    let title, text, btn;
+    if (running) { title = 'Checking websites right now'; text = 'You can keep looking around while it works. Schools fill in as they finish.'; btn = h('a', { class: 'btn primary', href: '#/run' }, 'See the progress'); }
+    else if (!ov.ready) { title = 'Next step: load your school sheet'; text = 'Download your Google Sheet as an Excel file (File → Download → Microsoft Excel), then choose it in Step 1 below.'; btn = h('a', { class: 'btn primary', href: '#/start' }, 'Go to Step 1'); }
+    else if (!scraped.length) { title = 'Next step: check your first schools'; text = 'Choose a group of schools and press Start checking. The dashboard will read their websites for you.'; btn = h('a', { class: 'btn primary', href: '#/run' }, 'Choose schools to check'); }
+    else if (look > 0) { title = `Next step: look at ${look} answer${look === 1 ? '' : 's'} the dashboard is not sure about`; text = 'They are listed least certain first. Open a school, press ✓ Right or ✗ Wrong, and each one drops off the list.'; btn = h('a', { class: 'btn primary', href: '#/review' }, 'Open the list'); }
+    else if (notChecked > 0) { title = `Next step: ${notChecked} school${notChecked === 1 ? ' is' : 's are'} not checked yet`; text = 'Pick “Schools not checked yet” and press Start checking.'; btn = h('a', { class: 'btn primary', href: '#/run' }, 'Check them now'); }
+    else { title = 'All done: every school is checked and nothing needs a look'; text = 'Download your results as an Excel file, or send them to your Google Sheet.'; btn = h('a', { class: 'btn primary', href: '#/start' }, 'Go to the downloads'); }
+    return h('div', { class: 'nextstep', role: 'region', 'aria-label': 'What to do next' }, h('div', { class: 'ns-text' }, h('b', null, title), h('span', null, text)), btn);
+  }
 
   /** Long text is clamped with a "Show all" toggle. */
   const pending = [];
@@ -285,7 +337,7 @@
     const cols = [
       ...(STATIC ? [] : [['_chk', '', 'chkcol']]),
       ['name', 'School'], ['tier', 'Tier'], ['status', 'Status'], ['found', 'Answers found', 'num'], ['fills', 'Blanks it can fill', 'num'],
-      ['differs', 'Different from sheet', 'num'], ['look', 'Needs checking', 'num'], ['scrapedAt', 'Last checked'], ...(STATIC ? [] : [['exportedAt', 'Sent to Google Sheet']]), [null, 'Website'],
+      ['differs', 'Different from sheet', 'num'], ['look', 'Needs checking', 'num'], ['scrapedAt', 'Last checked'],
     ];
     const headRow = h('tr');
     const validIds = new Set(ov.schools.map((s) => s.id));
@@ -354,7 +406,11 @@
           }));
         return h('tr', { class: 'click', onclick: (e) => { if (!e.target.closest('a, input, button')) location.hash = href; } },
           chkCell,
-          h('td', { class: 'name' }, h('a', { href }, s.name), h('span', { class: 'sub' }, s.region || '')),
+          h('td', { class: 'name' }, h('a', { href }, s.name), h('span', { class: 'sub' }, s.region || ''),
+            h('span', { class: 'sub' }, s.website ? ['Website: ', ext(s.website, shortUrl(s.website).split('/')[0])] : h('span', { class: 'muted' }, 'No website link'),
+              s.urlChanged ? [' ', h('span', { class: 'chip warn', title: 'The website link in your sheet changed since this school was last checked, so check it again.' }, 'link changed')] : null,
+              s.wrongSite ? [' ', h('span', { class: 'chip warn', title: 'This website never mentions the school’s name, so the link in your sheet may point to the wrong school. Please check it.' }, 'check link?')] : null),
+            !STATIC && s.exportedAt ? h('span', { class: 'sub', title: 'The last time this school’s answers were sent to your Google Sheet' }, 'Sent to Google Sheet ' + ago(s.exportedAt)) : null),
           h('td', null, s.tier == null ? '' : s.tier),
           h('td', null, chip(STATUS[s.status] || [s.status, ''], tip || null),
             s.changesCount > 0 ? [' ', h('span', { class: 'chip info', title: `${s.changesCount} answer${s.changesCount === 1 ? '' : 's'} on the school’s website changed since the last check: ${chSummary}` }, `${s.changesCount} changed`)] : null,
@@ -364,11 +420,7 @@
           h('td', { class: 'num' }, s.status === 'ok' ? (s.differs ?? 0) : ''),
           h('td', { class: 'num' }, s.status === 'ok' && s.look != null
             ? h('span', { class: 'chip ' + (s.look ? (s.doubtful ? 'bad' : 'warn') : 'ok'), title: `Main facts: ${s.ready} safe to use, ${s.check} need a quick look, ${s.doubtful} need checking` }, s.look ? String(s.look) : 'all safe') : ''),
-          h('td', { class: 'small muted' }, ago(s.scrapedAt)),
-          STATIC ? null : h('td', { class: 'small muted' }, s.exportedAt ? ago(s.exportedAt) : ''),
-          h('td', { class: 'small' }, s.website ? ext(s.website, shortUrl(s.website).split('/')[0]) : h('span', { class: 'muted' }, 'none'),
-            s.urlChanged ? [' ', h('span', { class: 'chip warn', title: 'The website link in your sheet changed since this school was last checked, so check it again.' }, 'link changed')] : null,
-            s.wrongSite ? [' ', h('span', { class: 'chip warn', title: 'This website never mentions the school’s name, so the link in your sheet may point to the wrong school. Please check it.' }, 'check link?')] : null));
+          h('td', { class: 'small muted' }, ago(s.scrapedAt)));
       }));
     };
     const search = h('input', { type: 'search', placeholder: 'Search school or region', 'aria-label': 'Search school or region', value: S.q, oninput: (e) => { S.q = e.target.value; draw(); } });
@@ -377,8 +429,9 @@
     setKids(
       app,
       h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Schools'),
-        h('p', null, 'Every school in your sheet. The dashboard reads each school’s own website and shows what it found next to what your sheet says. Click a number card to show only those schools, or click a school to see its answers and copy them.'),
+        h('p', null, 'Every school in your sheet. The dashboard reads each school’s own website and shows what it found next to what your sheet says. Click a number card to show only those schools, or click a school to see its answers and copy them. ', helpLink('status', 'What do the labels mean?')),
         STATIC && ov.generatedAt ? h('p', { class: 'snapshot' }, `Read-only copy of the results as of ${new Date(ov.generatedAt).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}. It does not update by itself.`) : null)),
+      nextStepCard(),
       h('div', { class: 'stats', role: 'group', 'aria-label': 'Quick filters' },
         statBtn('', ov.schools.length, 'all schools'),
         statBtn('ok', scraped.length, 'checked', 'Schools whose website has been read'),
@@ -393,6 +446,73 @@
     draw();
   }
 
+  // ------------------------------------- pages a person saved by hand (for websites that refuse automatic reading) ---
+  // The dashboard does not try to get past a website's security check. A person opens the school's pages in their own
+  // browser, saves them, and adds the files here; the dashboard reads them the same way it reads any website.
+  function savedPagesPanel(s, r, reload) {
+    const blocked = !r || r.status !== 'ok';
+    const out = h('p', { class: 'small' });
+    const say = (msg, bad) => { out.textContent = msg; out.className = 'small ' + (bad ? 'bad' : 'good'); };
+    const listBox = h('div');
+    const readBtn = h('button', { class: 'btn primary', type: 'button', disabled: true }, 'Read these pages');
+    const input = h('input', { type: 'file', multiple: true, accept: '.html,.htm,.pdf', hidden: true, 'aria-label': 'Choose the pages you saved' });
+    const addr = h('input', { type: 'text', class: 'wide', placeholder: 'https://… (only if you know the page’s web address)', 'aria-label': 'Web address of the page (optional)', autocomplete: 'off' });
+    const pick = h('button', { class: 'btn', type: 'button' }, 'Choose saved pages…');
+
+    async function drawList() {
+      let l;
+      try { l = await api('/api/manual-pages?school=' + encodeURIComponent(s.id)); } catch (e) { say(e.message, true); return; }
+      readBtn.disabled = !l.pages.length;
+      setKids(listBox, l.pages.length
+        ? h('ul', { class: 'savedlist' }, l.pages.map((p) => h('li', null,
+          h('b', null, p.title || p.name), ' ',
+          h('span', { class: 'muted small' }, `(${p.kind === 'pdf' ? 'PDF' : 'web page'}, ${Math.max(1, Math.round(p.bytes / 1024)).toLocaleString()} KB)`),
+          h('span', { class: 'sub' }, safeUrl(p.url) ? ext(p.url) : p.url,
+            p.urlFrom === 'name' ? h('span', { class: 'muted' }, ' (web address made up from the file name; it only matters for working out what the page is about)') : null),
+          h('button', { class: 'btn link small', type: 'button', onclick: async () => {
+            try { await api('/api/manual-pages/remove', { school: s.id, id: p.id }); } catch (e) { say(e.message, true); }
+            drawList();
+          } }, 'Remove')))) : h('p', { class: 'muted small' }, 'No saved pages yet.'));
+    }
+    async function upload(files) {
+      let added = 0;
+      const bad = [];
+      pick.disabled = true;
+      for (const f of files) {
+        say(`Adding “${f.name}”…`);
+        const q = new URLSearchParams({ school: s.id, name: f.name });
+        if (files.length === 1 && addr.value.trim()) q.set('page', addr.value.trim());
+        try { await checkedFetch('/api/manual-pages?' + q, { method: 'POST', headers: { 'X-Dashboard': '1', 'Content-Type': 'application/octet-stream' }, body: f }, 'That page could not be added.'); added++; } catch (e) { bad.push(`“${f.name}”: ${e.message}`); }
+      }
+      pick.disabled = false; input.value = ''; addr.value = '';
+      await drawList();
+      say((added ? `${added} page${added === 1 ? '' : 's'} added. ` : '') + (bad.length ? 'Not added: ' + bad.join(' ') : 'Press “Read these pages” when you have added them all.'), !added && bad.length > 0);
+    }
+    pick.onclick = () => input.click();
+    input.onchange = () => { if (input.files.length) upload([...input.files]); };
+    readBtn.onclick = async () => {
+      readBtn.disabled = true; say('Reading the saved pages. This takes a few seconds.');
+      try {
+        const r2 = await api('/api/manual-pages/build', { school: s.id });
+        const mine = r2.schools.find((x) => x.id === s.id) || r2.schools[0] || {};
+        say(`Done. Read ${r2.pages} page${r2.pages === 1 ? '' : 's'}` + (mine.total ? ` and found ${mine.found} of ${mine.total} answers.` : '.'));
+        if (reload) setTimeout(reload, 900);
+      } catch (e) { say(e.message, true); readBtn.disabled = false; }
+    };
+    drawList();
+    return h('details', { class: 'panel savedpages', open: blocked },
+      h('summary', null, blocked ? 'The website does not let the dashboard in. You can still use it: add pages you saved yourself' : 'Pages saved by hand: add or change them'),
+      h('p', null, 'Some websites show a security check (for example “Just a moment…”) and refuse automatic readers. The dashboard respects that and does not try to get around it. You can still use the school’s website yourself: open its pages in your own browser, save them, and add the files here. The dashboard reads them the same way it reads any other website.'),
+      h('ol', null,
+        h('li', null, 'In your own browser, open the school’s pages that hold the answers: admissions and how to apply, tuition and financial aid, key dates, “fast facts” or “at a glance”, and the pages about classes and faculty.'),
+        h('li', null, 'On each page, wait until it has fully loaded, then press ', h('b', null, 'Ctrl + S'), ' and save it as ', h('b', null, '“Webpage, Complete”'), '. The file ending in .html is the one to add (ignore the folder next to it). If a page will not save properly, print it to a PDF instead.'),
+        h('li', null, 'Choose the saved files below. You can pick several at once.'),
+        h('li', null, 'Press ', h('b', null, 'Read these pages'), '. The answers then appear on this page, marked as read from saved pages.')),
+      h('label', { class: 'field' }, h('span', null, 'Web address of the page (optional, used when you add one file at a time)'), addr),
+      h('div', { class: 'runbtns' }, pick, input, readBtn), out, listBox,
+      h('p', { class: 'muted small' }, 'These pages are shared by every school on the same website (for example the middle and upper school). ', helpLink('blocked', 'More about blocked websites'), '.'));
+  }
+
   // ------------------------------------------------------------ school view ---
   async function viewSchool(id, tabIndex) {
     app.replaceChildren(h('p', { class: 'loading' }, 'Loading…'));
@@ -402,6 +522,7 @@
       return;
     }
     const s = d.school, r = d.result;
+    document.title = s.name + ' · School Info Sheet';
     const tab = d.tabs[d.tabIndex];
     const running = !!(S.job && S.job.running);
     const rowsBox = h('div');
@@ -585,6 +706,15 @@
         STATIC ? null : 'Press “Check this website again” above to read the new link.')
       : null;
 
+    // answers read from pages a person saved by hand (the website does not let the dashboard read it)
+    const savedNotice = r && r.source === 'saved-pages' && r.savedPages
+      ? h('div', { class: 'notice info' }, h('b', null, 'Read from pages saved by hand. '),
+        `These answers come from ${r.savedPages.count} page${r.savedPages.count === 1 ? '' : 's'} that someone saved from the school’s website on ${new Date(r.savedPages.at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}. `,
+        r.lastAttempt ? `The website refused an automatic check again ${ago(r.lastAttempt.at)}, so these answers were kept. ` : '',
+        'Save the pages again and press “Read these pages” to update them.')
+      : null;
+    const savedPanel = !STATIC && s.website && (!r || r.status !== 'ok' || r.source === 'saved-pages') ? savedPagesPanel(s, r, () => viewSchool(id, tabIndex)) : null;
+
     // a plain-words guide to reading the page, with this school's own numbers
     const fieldRows = d.rows.filter((x) => x.kind === 'field');
     const foundN = fieldRows.filter((x) => x.scraped && x.scraped.status === 'found').length;
@@ -596,7 +726,8 @@
         tcs ? h('li', null, h('span', { class: 'trust high' }, 'Safe to use'), ` (${tcs.ready} here): the answer came from a very reliable page and is stated clearly. You can copy it without checking.`) : null,
         tcs ? h('li', null, h('span', { class: 'trust medium' }, 'Quick look'), ' and ', h('span', { class: 'trust low' }, 'Check this'), ` (${tcs.check + tcs.doubtful} here): open the school’s page and make sure it is right before you copy it.`) : null,
         h('li', null, 'Press ', h('b', null, 'Copy'), ' to copy an answer, then paste it into your sheet. Press ', h('b', null, '✓ Right'), ' or ', h('b', null, '✗ Wrong'), ' after you check an answer: it helps the dashboard learn which answers to trust.'),
-        h('li', null, 'A different answer from your sheet does not mean the website is wrong. Your sheet may simply be out of date.'))) : null;
+        h('li', null, 'A different answer from your sheet does not mean the website is wrong. Your sheet may simply be out of date.'),
+        h('li', null, 'Not sure what a label or colour means? ', helpLink('labels', 'Open the Help page'), '.'))) : null;
 
     const labelByKey = new Map(d.rows.filter((x) => x.kind === 'field').map((x) => [x.key, String(x.label || x.key).replace(/:$/, '')]));
     const siteChanges = r && r.changes && r.changes.length
@@ -631,7 +762,7 @@
         h('div', { class: 'actions' }, xlsxSchoolBtn, fileBtn, d.exportConfigured ? exportBtn : null, d.exportFailing ? h('span', { class: 'muted small' }, 'One-click send is off because its last test failed (see Start here). The file download works.') : null,
           STATIC ? null : h('button', { class: 'btn primary', type: 'button', disabled: running || !s.website, title: running ? 'A check is already running' : null,
             onclick: () => startRun({ scope: 'schools', ids: [s.id] }) }, r ? 'Check this website again' : 'Check this school’s website'))),
-      wrongSite, urlChangedNotice, notice, siteChanges, exportBox, guideBox, filterBox, rowsBox,
+      wrongSite, urlChangedNotice, notice, savedNotice, savedPanel, siteChanges, exportBox, canExport && !STATIC ? colourDetails() : null, guideBox, filterBox, rowsBox,
       r && r.pages.length ? h('details', { class: 'panel' }, h('summary', null, `Pages read on this website (${r.pages.length})`),
         h('div', { class: 'tablewrap' }, h('table', null,
           h('thead', null, h('tr', null, h('th', null, 'Page'), h('th', null, 'Looks like a page about'), h('th', { class: 'num' }, 'Amount of text'))),
@@ -739,6 +870,7 @@
     return h('details', { class: 'panel' },
       h('summary', null, 'Advanced: Google Sheet “School Info” menu & direct sync'),
       h('p', { class: 'muted small' }, 'Most people can simply use the Excel (.xlsx) or CSV downloads above. If your team wants the special “School Info” menu inside Google Sheets (which highlights new cells yellow and puts suggestions in comments), follow this one-time setup:'),
+      colourDetails(),
       h('p', { class: 'small' }, h('b', null, 'Set up once in your Google Sheet copy: '), 'click Extensions → Apps Script, replace or add a Script file with the copied code, click Save, and reload your sheet.'),
       h('div', { class: 'runbtns' }, copyCodeBtn, dlBtn), out,
       exportPanel(),
@@ -876,7 +1008,8 @@
       h('div', { class: 'runbtns' },
         h('a', { class: 'btn primary', href: '#/' }, ready ? `Open the list of ${ov.schools.length} schools` : 'Open the list of schools'),
         xlsxBtn, csvBtn, saveZip),
-      out);
+      out,
+      STATIC ? null : colourDetails());
   }
 
   async function viewStart() {
@@ -897,6 +1030,7 @@
     app.replaceChildren(
       h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Start here'),
         h('p', null, todo.length ? `${todo.length} thing${todo.length === 1 ? '' : 's'} left to set up. Then follow the 3 steps below.` : 'This dashboard reads private schools’ own websites and fills in the answers to the questions in your School Information Sheet. Follow the 3 steps below. New here? Open the Help page at the top for a short guide.'))),
+      nextStepCard(),
       checklistBlock,
       workbookPanel(() => viewStart(), !!(S.ov && S.ov.ready)),
       gatherPanel(),
@@ -1217,7 +1351,7 @@
       h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Check websites'),
         h('p', null, 'The dashboard opens each school’s own public website, one page at a time and politely, and saves the answers it finds. Then you can look at them, copy them, or download them.'))),
       h('div', { class: 'panel' }, h('h2', null, 'Choose which schools to check, then start'),
-        h('p', { class: 'muted small' }, 'Tier is the priority group from your sheet (Tier 1 is the most important). A big group takes a long time: about an hour for 65 schools. Keep this computer awake while it works.'),
+        h('p', { class: 'muted small' }, 'Tier is the priority group from your sheet (Tier 1 is the most important). A big group can take an hour or more, and the time shown below gets more accurate as schools finish. Keep this computer awake while it works. ', helpLink('status', 'What does Tier mean?')),
         ov.ready ? [
           h('div', { class: 'pickrow', role: 'group', 'aria-label': 'Which schools to check' }, pills),
           h('label', { class: 'check', for: 'refresh' }, refresh, 'Read every website again from scratch (slower). Leave this unticked to reuse pages read in the last 7 days.'),
@@ -2013,10 +2147,10 @@
       h('td', { class: 'name' }, h('a', { href: '#/school/' + encodeURIComponent(i.schoolId) }, i.school), h('span', { class: 'sub' }, i.tier ? 'Tier ' + i.tier : '')),
       h('td', null, i.label), h('td', { class: 'val' }, i.value),
       h('td', { class: 'small' }, safeUrl(i.source) ? h('a', { href: i.source, target: '_blank', rel: 'noopener noreferrer', title: i.source, onclick: (e) => e.stopPropagation() }, shortUrl(i.source)) : h('span', { class: 'muted' }, 'none')),
-      h('td', { class: 'small' }, i.why.map((w) => h('div', null, w)))));
+      h('td', { class: 'small whycol' }, i.why.map((w) => h('div', null, w)))));
     setKids(app,
       h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Answers to check'),
-        h('p', null, 'These are the answers the dashboard is least sure about, the least certain first. Its rating looks at where an answer came from (the school’s own fact sheet, or its page on that topic, is the most reliable) and how clearly the website says it. It never looks at your sheet. Answers it is sure about are left out, so you only spend time where a person is needed. Open a school and press ✓ Right or ✗ Wrong: answers you check disappear from this list.'))),
+        h('p', null, 'These are the answers the dashboard is least sure about, the least certain first. Its rating looks at where an answer came from (the school’s own fact sheet, or its page on that topic, is the most reliable) and how clearly the website says it. It never looks at your sheet. Answers it is sure about are left out, so you only spend time where a person is needed. Open a school and press ✓ Right or ✗ Wrong: answers you check disappear from this list. ', helpLink('ratings', 'What do the ratings mean?')))),
       h('div', { class: 'stats', role: 'group', 'aria-label': 'Summary' },
         h('div', { class: 'stat' }, h('b', null, String(q.facts)), h('span', null, 'main facts rated')),
         h('div', { class: 'stat' }, h('b', null, pct(q.readyToUse, q.facts)), h('span', null, `safe to use (${q.readyToUse}): no need to check`)),
@@ -2106,23 +2240,31 @@
 
   // ------------------------------------------------------------- help view ---
   // The plain-words guide: what the dashboard is, how to use it, and what every word and colour means.
-  function viewHelp() {
+  function viewHelp(section) {
     const chipOf = (pair) => chip(pair);
     const term = (label, text) => [h('dt', null, label), h('dd', null, text)];
+    const TOC = [['what', 'What it is for'], ['guide', 'Quick guide'], ['ratings', 'Ratings (Safe to use…)'], ['colours', 'Colours in your sheet and Excel files'], ['labels', 'Labels on a school page'], ['status', 'Status and Tier'], ['blocked', 'A website will not let us in'], ['questions', 'Common questions']];
+    // a link such as #/help/colours opens the page already scrolled to that section
+    requestAnimationFrame(() => {
+      const el = section ? document.getElementById('help-' + section) : null;
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' });
+      else if (!section) window.scrollTo(0, 0);
+    });
     setKids(app,
       h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Help: what everything means'),
         h('p', null, 'A short guide in plain words. You do not need any technical knowledge to use this dashboard.'))),
-      h('div', { class: 'panel' }, h('h2', null, 'What is this dashboard for?'),
+      h('nav', { class: 'toc', 'aria-label': 'Jump to a section' }, h('b', null, 'Jump to: '), TOC.map(([id, text]) => h('a', { href: '#/help/' + id }, text))),
+      h('div', { class: 'panel', id: 'help-what' }, h('h2', null, 'What is this dashboard for?'),
         h('p', null, 'Your School Information Sheet has a long list of questions about each private school: tuition, class sizes, deadlines, and so on. Finding the answers means reading every school’s website. This dashboard does the reading for you. It opens each school’s own website, finds the answers, and shows them next to what your sheet says now, so you can copy the answers you want.'),
         h('p', null, 'It never changes your sheet. It only shows you answers and lets you copy them.')),
-      h('div', { class: 'panel' }, h('h2', null, 'The quick guide'),
+      h('div', { class: 'panel', id: 'help-guide' }, h('h2', null, 'The quick guide'),
         h('ol', null,
           h('li', null, h('b', null, 'Start here: '), 'load your School Information Sheet once. Then press “Start checking websites”.'),
-          h('li', null, h('b', null, 'Check websites: '), 'choose a group of schools (a “tier”) and press Start checking. It takes a while (about an hour for 65 schools), so keep the computer awake.'),
+          h('li', null, h('b', null, 'Check websites: '), 'choose a group of schools (a “tier”) and press Start checking. A big group can take an hour or more, so keep the computer awake.'),
           h('li', null, h('b', null, 'Schools: '), 'open a school to see its answers. The right-hand column is what the school’s own website says. Press Copy to copy an answer.'),
           h('li', null, h('b', null, 'To check: '), 'this list shows only the answers the dashboard is not sure about, so you do not have to look at everything.'),
           h('li', null, h('b', null, 'Download: '), 'get everything as an Excel file from the Start here page or from any school.'))),
-      h('div', { class: 'panel' }, h('h2', null, 'How sure is the dashboard? (the colour tags)'),
+      h('div', { class: 'panel', id: 'help-ratings' }, h('h2', null, 'How sure is the dashboard? (the colour tags)'),
         h('p', null, 'Every important answer has a rating out of 100 and one of three tags:'),
         h('dl', { class: 'glossary' },
           ...term(h('span', { class: 'trust high' }, 'Safe to use'), 'The answer came from a very reliable page (the school’s own fact sheet or its page about that topic) and the page states it clearly. You can copy it without checking.'),
@@ -2131,7 +2273,16 @@
         h('p', null, h('b', null, 'How is the rating worked out? '), 'From where the answer came from (the school’s own fact sheet is the most reliable, a news post the least), how clearly the website says it, whether the same answer appears on several pages, and whether the answer looks reasonable. Click “Why this rating?” under any answer to see the exact reasons.'),
         h('p', null, h('b', null, 'Why does it ignore my sheet? '), 'Because your sheet can be out of date or have mistakes. An answer is trusted for where it came from, not for matching a spreadsheet.'),
         h('p', null, h('b', null, 'Is “Safe to use” always right? '), 'No. It means the evidence is strong, not that it is certain. The ✓ Right and ✗ Wrong buttons let you check, and the Accuracy page shows how often the ratings turn out to be right.')),
-      h('div', { class: 'panel' }, h('h2', null, 'What the labels on a school page mean'),
+      h('div', { class: 'panel', id: 'help-colours' }, h('h2', null, 'What the colours mean in your Google Sheet and Excel files'),
+        h('p', null, 'When you send answers to your Google Sheet (open the sheet, then ', h('b', null, 'School Info → Load export file…'), ') or download the Excel file, some cells are coloured to show what happened to them. The dashboard never changes your own sheet file. Here is the key:'),
+        colourKey(false),
+        h('h3', null, 'The colours inside this dashboard'),
+        h('dl', { class: 'glossary' },
+          ...term(chip(['Green', 'ok']), 'Good news: safe to use, checked, or the same as your sheet.'),
+          ...term(chip(['Amber', 'warn']), 'Take a quick look: a different answer, a website that blocked us, or an answer to check.'),
+          ...term(chip(['Red', 'bad']), 'Needs a person: the dashboard is not sure, or a website would not open.'),
+          ...term(chip(['Blue', 'info']), 'Information: for example, the website can fill a blank in your sheet, or an answer changed on the school’s website.'))),
+      h('div', { class: 'panel', id: 'help-labels' }, h('h2', null, 'What the labels on a school page mean'),
         h('dl', { class: 'glossary' },
           ...term(chipOf(VERDICT.match), 'The website and your sheet say the same thing.'),
           ...term(chipOf(VERDICT.differs), 'They say different things. The website may be right and your sheet out of date, so open the school’s page and see.'),
@@ -2140,18 +2291,26 @@
           ...term(chipOf(VERDICT['sheet-only']), 'The website did not give an answer, but your sheet already has one. Nothing to do.'),
           ...term(chipOf(VERDICT.none), 'Neither your sheet nor the website has an answer.'),
           ...term(chipOf(VERDICT.manual), 'This question is never answered by a website (for example, things people have to find out by phone), so fill it in by hand.'))),
-      h('div', { class: 'panel' }, h('h2', null, 'The status of a school'),
+      h('div', { class: 'panel', id: 'help-status' }, h('h2', null, 'The status of a school'),
         h('dl', { class: 'glossary' },
           ...term(chipOf(STATUS.ok), 'The dashboard has read this school’s website.'),
           ...term(chipOf(STATUS['not-scraped']), 'Nobody has checked this school’s website yet.'),
-          ...term(chipOf(STATUS.blocked), 'The school’s website stops automatic readers. Open it yourself to fill in the answers.'),
+          ...term(chipOf(STATUS.blocked), ['The school’s website stops automatic readers. You can save its pages in your own browser and add them on the school’s page. ', helpLink('blocked', 'How?')]),
           ...term(chipOf(STATUS.error), 'The website did not open. The link in your sheet may be old or wrong.'),
           ...term(chipOf(STATUS.thin), 'The website shows its text in a way the dashboard cannot read. Open it yourself.'),
           ...term(chipOf(STATUS.robots), 'The website asks automatic programs not to read it, and the dashboard respects that.'),
           ...term(chipOf(STATUS['no-website']), 'Your sheet has no website link for this school.'),
           ...term('Tier', 'The priority group from your sheet. Tier 1 is the most important schools.'),
           ...term('check link?', 'The website never mentions the school’s name, so the link in your sheet may belong to a different school.'))),
-      h('div', { class: 'panel' }, h('h2', null, 'Common questions'),
+      h('div', { class: 'panel', id: 'help-blocked' }, h('h2', null, 'A school’s website will not let the dashboard in'),
+        h('p', null, 'A few schools protect their website with a security check (a page that says “Just a moment…”), so the dashboard shows ', chipOf(STATUS.blocked), '. The dashboard respects that and never tries to get around it. There are two good ways forward:'),
+        h('ol', null,
+          h('li', null, h('b', null, 'Save the pages yourself. '), 'This works today. Open the school’s pages in your own browser, press Ctrl + S and save it as “Webpage, Complete”, then add the .html files on the school’s page (the box says “add pages you saved yourself”). The dashboard reads them like any website, and marks the answers as read from saved pages. Do it again whenever you want fresh answers.'),
+          h('li', null, h('b', null, 'Ask the school to let the dashboard in. '), 'This fixes it for good. Send the school’s website or admissions team a note like the one below.')),
+        h('blockquote', { class: 'letter' },
+          'Hello, we are Cardinal Education. We keep a School Information Sheet for families, using only facts that are public on schools’ own websites. Our small program reads one page at a time, follows your robots.txt, and names itself “SchoolInfoSheetBot/1.0 (polite research crawler; reads public school pages only)”. Your website’s security check currently stops it. Could your web team allow that name, or send us your current fact sheet (tuition, dates, enrollment, class sizes)? Thank you.')),
+      h('div', { class: 'panel', id: 'help-questions' }, h('h2', null, 'Common questions'),
+        h('details', null, h('summary', null, 'What do the yellow and orange cells in my Google Sheet mean?'), h('p', null, 'Yellow: a blank cell the dashboard filled in from the school’s website. Orange: your sheet already had a different answer, so nothing was overwritten and the website’s answer is in the cell’s note. Point at a cell to read its note. ', helpLink('colours', 'See the full colour key'), '.')),
         h('details', null, h('summary', null, 'Does the dashboard change my Google Sheet?'), h('p', null, 'No. It only reads the file you give it. You copy the answers yourself, or use the buttons to send answers to a copy of your sheet.')),
         h('details', null, h('summary', null, 'Why is an answer missing?'), h('p', null, 'Either the school does not publish it, or it is behind a login (such as an application portal), or the website is built in a way the dashboard cannot read. These are filled in by hand.')),
         h('details', null, h('summary', null, 'How do I know the answer came from the right website?'), h('p', null, 'Under every answer, “From:” shows the page it was found on. Press “Show the words from the website” to see the exact sentence. If a school is marked “check link?”, the website in your sheet may belong to a different school, so fix the link first.')),
@@ -2172,6 +2331,8 @@
       // with no page chosen, open Start here until a sheet has been loaded, then the school list
       if (!view) view = !STATIC && S.ov && !S.ov.ready ? 'start' : 'schools';
       S.view = view;
+      const TITLES = { start: 'Start here', run: 'Check websites', ask: 'Ask', accuracy: 'Accuracy', review: 'To check', help: 'Help', script: 'Technical details' };
+      document.title = (view === 'school' ? 'School' : TITLES[view] || 'Schools') + ' · School Info Sheet';   // tells browser tabs apart
       document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.view === (view === 'school' ? 'schools' : view)));
       if (view === 'start') return await viewStart();
       if (view === 'school') return await viewSchool(decodeURIComponent(hash.slice('school/'.length)));
@@ -2179,7 +2340,7 @@
       if (view === 'ask') return await viewAsk();
       if (view === 'accuracy') return await viewAccuracy();
       if (view === 'review') return await viewReview();
-      if (view === 'help') return viewHelp();
+      if (view === 'help') return viewHelp(hash.split('/')[1]);
       if (view === 'script') return await viewScript(hash.slice('script/'.length));
       return viewSchools();
     } catch (e) {
@@ -2249,6 +2410,36 @@
     } catch { /* not signed in: the page is about to move to the sign-in */ }
   }
 
+  // Reading comfort: bigger text and a light / dark switch, remembered on this computer.
+  function initViewOptions() {
+    const box = document.getElementById('viewopts');
+    const root = document.documentElement;
+    if (!box || !root) return;
+    const store = {
+      get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+      set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* it just will not be remembered */ } },
+    };
+    const SIZES = [1, 1.12, 1.25, 1.4];
+    let size = Math.max(0, Math.min(SIZES.length - 1, Math.trunc(Number(store.get('sis-size')) || 0)));
+    const saved = store.get('sis-theme');
+    if (saved === 'light' || saved === 'dark') root.dataset.theme = saved;
+    const isDark = () => (root.dataset.theme ? root.dataset.theme === 'dark' : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+    const smaller = h('button', { type: 'button', class: 'btn small', title: 'Make the text smaller', 'aria-label': 'Make the text smaller' }, 'A−');
+    const bigger = h('button', { type: 'button', class: 'btn small', title: 'Make the text bigger', 'aria-label': 'Make the text bigger' }, 'A+');
+    const theme = h('button', { type: 'button', class: 'btn small', title: 'Switch between a light and a dark page' });
+    const apply = () => {
+      document.body.style.zoom = size ? String(SIZES[size]) : '';
+      smaller.disabled = size === 0; bigger.disabled = size === SIZES.length - 1;
+      theme.textContent = isDark() ? '☀ Light' : '☾ Dark';
+    };
+    smaller.onclick = () => { size = Math.max(0, size - 1); store.set('sis-size', String(size)); apply(); };
+    bigger.onclick = () => { size = Math.min(SIZES.length - 1, size + 1); store.set('sis-size', String(size)); apply(); };
+    theme.onclick = () => { root.dataset.theme = isDark() ? 'light' : 'dark'; store.set('sis-theme', root.dataset.theme); apply(); };
+    setKids(box, smaller, bigger, theme);
+    apply();
+  }
+
   window.addEventListener('hashchange', route);
+  initViewOptions();
   route().then(() => { if (!STATIC) { poll(true); initControls(); } });
 })();

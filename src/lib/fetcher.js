@@ -350,4 +350,4 @@ class Fetcher {
   }
 }
 
-module.exports = { Fetcher, parseRobots, robotsAllows, isPrivateIp, assertPublicUrl };
+module.exports = { Fetcher, parseRobots, robotsAllows, isPrivateIp, assertPublicUrl, BLOCK_MARKERS };
