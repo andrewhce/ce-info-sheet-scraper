@@ -253,7 +253,7 @@ function startServer(port, dataDir) {
 
     // Regression: All dashboard routes render cleanly with zero null/undefined leaks, disable empty Run buttons, and handle 401 sign-in redirects
     const appSrc = fs.readFileSync(path.join(ROOT, 'src', 'public', 'app.js'), 'utf8');
-    async function renderRoute({ hash = '#/ask', webSearchOn = true, force401OnExport = false, blockedSchool = false } = {}) {
+    async function renderRoute({ hash = '#/ask', webSearchOn = true, force401OnExport = false, blockedSchool = false, holdWorkbook = null } = {}) {
       const makeText = (s) => ({ nodeType: 3, textContent: String(s) });
       const appended = [];
       function makeNode(tag) {
@@ -303,7 +303,8 @@ function startServer(port, dataDir) {
       }
       const calls = [];
       const rootApp = makeNode('main');
-      const byId = { app: rootApp, jobpill: makeNode('span'), who: makeNode('span'), quitbtn: makeNode('button'), dataloc: makeNode('span') };
+      const byId = { app: rootApp, jobpill: makeNode('span'), who: makeNode('span'), quitbtn: makeNode('button'), dataloc: makeNode('span'), tasks: makeNode('div') };
+      const hashListeners = [];
       const allByTag = (root, tag) => {
         const out = [];
         const walk = (n) => { if (n.tagName === tag) out.push(n); for (const c of n.children || []) walk(c); };
@@ -316,7 +317,7 @@ function startServer(port, dataDir) {
         URLSearchParams,
         location,
         history: { replaceState: () => {} },
-        window: { addEventListener: () => {}, scrollY: 0, scrollTo: () => {} },
+        window: { addEventListener: (type, fn) => { if (type === 'hashchange') hashListeners.push(fn); }, scrollY: 0, scrollTo: () => {} },
         setTimeout: () => 0,
         clearTimeout: () => {},
         requestAnimationFrame: (fn) => fn(),
@@ -331,7 +332,9 @@ function startServer(port, dataDir) {
         },
         fetch: async (url, opts) => {
           const clean = String(url).split('?')[0];
-          calls.push({ url: clean, method: (opts && opts.method) || 'GET', body: opts && opts.body ? JSON.parse(opts.body) : null });
+          let sent = null; try { sent = opts && opts.body ? JSON.parse(opts.body) : null; } catch { /* a file upload is not JSON */ }
+          calls.push({ url: clean, method: (opts && opts.method) || 'GET', body: sent });
+          if (clean === '/api/workbook' && holdWorkbook) await holdWorkbook;   // lets a test leave the page while the sheet is still loading
           if (clean === '/api/verify' && opts && opts.method === 'POST') return { ok: true, status: 200, json: async () => ({ verdict: 'correct', stale: false }) };
           if (force401OnExport && clean === '/api/export-spreadsheet') {
             return { ok: false, status: 401, json: async () => ({ error: 'Please sign in again.', signIn: '/auth/login' }) };
@@ -394,7 +397,9 @@ function startServer(port, dataDir) {
       vm.runInNewContext(appSrc, ctx, { filename: 'src/public/app.js' });
       for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
       const walkText = (n) => (n.nodeType === 3 ? n.textContent : (n.children || []).map(walkText).join('|'));
-      return { rootApp, walkText, buttons: () => allByTag(rootApp, 'BUTTON'), links: () => allByTag(rootApp, 'A'), location, calls, doc: ctx.document };
+      const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
+      const go = async (hsh) => { location.hash = hsh; for (const fn of hashListeners) await fn(); await settle(); };   // like clicking a menu link
+      return { rootApp, walkText, buttons: () => allByTag(rootApp, 'BUTTON'), links: () => allByTag(rootApp, 'A'), inputs: () => allByTag(rootApp, 'INPUT'), tasks: byId.tasks, go, settle, location, calls, doc: ctx.document };
     }
     for (const [hsh, expectText] of [
       ['#/ask', 'New chat'],
@@ -521,6 +526,55 @@ function startServer(port, dataDir) {
       const ht = help.walkText(help.rootApp);
       assert.ok(ht.includes('A school’s website will not let the dashboard in') && ht.includes('SchoolInfoSheetBot/1.0') && ht.includes('Could your web team allow that name'), 'Help explains the two ways forward and gives a message to send the school');
       ok('a blocked school page explains how to save the pages by hand, lists them, and never suggests getting around the check');
+    }
+
+    // Anything that takes a while keeps going when the person opens another page, and finishing never pulls them back
+    {
+      const sheetInput = (res) => res.inputs().find((i) => i.attrs.type === 'file' && /School Information Sheet/.test(i.attrs['aria-label'] || ''));
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      const res = await renderRoute({ hash: '#/start', holdWorkbook: gate });
+      const input = sheetInput(res);
+      assert.ok(input, 'Start here has the sheet chooser');
+      input.files = [{ name: 'Marketing Sheet.xlsx' }];
+      input.onchange();
+      await res.settle();
+      assert.ok(res.walkText(res.tasks).includes('Loading your school sheet'), 'a card says the sheet is loading');
+      assert.ok(res.walkText(res.tasks).includes('You can keep using the dashboard'), 'the card says the person does not have to wait');
+      await res.go('#/help');
+      assert.ok(res.walkText(res.rootApp).includes('What is this dashboard for?'), 'the person can open another page while the sheet loads');
+      assert.ok(res.walkText(res.tasks).includes('Loading your school sheet'), 'and the card follows them to that page');
+      await res.go('#/start');
+      assert.ok(res.walkText(res.rootApp).includes('Reading…') && !res.walkText(res.rootApp).includes('Waiting for your file'), 'coming back to Start here shows that it is still reading, not an empty box');
+      await res.go('#/help');
+      release();
+      await res.settle();
+      const after = res.walkText(res.rootApp);
+      assert.ok(after.includes('What is this dashboard for?') && !after.includes('Load your school sheet'), 'finishing does not pull the person back to Start here');
+      const tray = res.walkText(res.tasks);
+      assert.ok(tray.includes('Your school sheet is loaded') && tray.includes('Open the school list'), 'a card says it is done, with a link to the school list: ' + tray);
+      assert.ok(res.links().length >= 0 && res.calls.filter((c) => c.url === '/api/workbook').length === 1, 'the sheet was sent exactly once');
+
+      // staying on Start here: the page updates by itself when the sheet is ready
+      let release2;
+      const gate2 = new Promise((r) => { release2 = r; });
+      const stay = await renderRoute({ hash: '#/start', holdWorkbook: gate2 });
+      const input2 = sheetInput(stay);
+      input2.files = [{ name: 'Marketing Sheet.xlsx' }];
+      input2.onchange();
+      await stay.settle();
+      release2();
+      await stay.settle();
+      assert.ok(stay.walkText(stay.rootApp).includes('Replace sheet (.xlsx)'), 'on Start here the page shows the loaded sheet by itself');
+
+      // a download keeps its own card
+      const dl = await renderRoute({ hash: '#/start' });
+      const xl = dl.buttons().find((b) => dl.walkText(b).includes('Download Excel (.xlsx)'));
+      assert.ok(xl);
+      await xl.click();
+      await dl.settle();
+      assert.ok(dl.calls.some((c) => c.url === '/api/export-spreadsheet'), 'the Excel file was asked for');
+      ok('loading the sheet keeps going on other pages, shows a card, and never pulls the person back to Start here');
     }
 
     const barNoWeb = await renderRoute({ hash: '#/ask', webSearchOn: false });

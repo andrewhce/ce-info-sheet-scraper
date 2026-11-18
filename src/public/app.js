@@ -135,12 +135,51 @@
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
+  // ---- things that take a while keep going when you open another page ----
+  // Each one shows as a small card at the bottom right of every page and says when it is done. Finishing never
+  // re-draws a page you moved to, except to fill in what that page was waiting for (see refreshIfOn).
+  const TASKS = new Map();   // id -> { id, state: 'running' | 'done' | 'failed', label, title, message, link, linkText, hideOnView }
+  let taskSeq = 0;
+  function dismissTask(id) { TASKS.delete(id); drawTasks(); }
+  function drawTasks() {
+    const box = document.getElementById('tasks');
+    if (!box) return;
+    setKids(box, [...TASKS.values()].filter((t) => !(t.hideOnView && t.hideOnView === S.view)).map((t) => h('div', { class: 'taskcard ' + t.state, role: t.state === 'failed' ? 'alert' : 'status' },
+      h('span', { class: 'taskicon' + (t.state === 'running' ? ' spin' : ''), 'aria-hidden': 'true' }, t.state === 'done' ? '✓' : t.state === 'failed' ? '!' : ''),
+      h('div', { class: 'tasktext' },
+        h('b', null, t.state === 'running' ? t.label : t.title),
+        t.message ? h('span', null, t.message) : null,
+        t.link ? h('a', { href: t.link, target: /^https?:/i.test(t.link) ? '_blank' : null, rel: /^https?:/i.test(t.link) ? 'noopener noreferrer' : null, onclick: () => { if (t.state !== 'running') dismissTask(t.id); } }, t.linkText || 'Open') : null),
+      t.state !== 'running' ? h('button', { type: 'button', class: 'taskx', 'aria-label': 'Dismiss this message', title: 'Dismiss', onclick: () => dismissTask(t.id) }, '✕') : null)));
+  }
+  const taskRunning = (id) => { const t = TASKS.get(id); return !!(t && t.state === 'running'); };
+  function startTask(id, label, extra) { TASKS.set(id, { id, state: 'running', label, ...(extra || {}) }); drawTasks(); }
+  function endTask(id, { title, message, link, linkText, failed } = {}) {
+    const t = { ...(TASKS.get(id) || {}), id, state: failed ? 'failed' : 'done', title: title || (failed ? 'That did not work' : 'Done'), message: message || '', link: link || null, linkText: linkText || null };
+    TASKS.set(id, t); drawTasks();
+    if (!failed) setTimeout(() => { if (TASKS.get(id) === t) dismissTask(id); }, 15000);   // good news fades by itself; a problem stays until dismissed
+  }
+  /** Re-draws the page the person is on, but only if it is one of `views` (the pages that show what just finished). */
+  function refreshIfOn(...views) {
+    if (!views.includes(S.view)) return;
+    if (S.view !== 'start' && document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;   // never interrupt typing
+    const y = window.scrollY;
+    const again = S.view === 'schools' ? viewSchools() : S.view === 'start' ? viewStart() : S.view === 'review' ? viewReview() : S.view === 'run' ? viewRun() : null;
+    Promise.resolve(again).then(() => window.scrollTo(0, y));
+  }
+
   async function downloadSpreadsheet(params) {
-    const q = new URLSearchParams(params).toString();
-    const r = await checkedFetch('/api/export-spreadsheet?' + q, undefined, 'Could not create spreadsheet.');
-    const name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '') || [])[1] || ('school-info.' + (params.format || 'xlsx'));
-    triggerBlobDownload(await r.blob(), name);
-    return { name, count: Number(r.headers.get('X-Export-Count')) || 0 };
+    const id = 'file-' + (++taskSeq);   // each file gets its own card
+    const what = params.format === 'csv' ? 'the CSV file' : 'the Excel file';
+    startTask(id, `Making ${what}…`);
+    try {
+      const q = new URLSearchParams(params).toString();
+      const r = await checkedFetch('/api/export-spreadsheet?' + q, undefined, 'Could not create spreadsheet.');
+      const name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '') || [])[1] || ('school-info.' + (params.format || 'xlsx'));
+      triggerBlobDownload(await r.blob(), name);
+      endTask(id, { title: `Saved ${name}`, message: 'It is in your Downloads folder.' });
+      return { name, count: Number(r.headers.get('X-Export-Count')) || 0 };
+    } catch (e) { dismissTask(id); throw e; }   // the button that was pressed shows the problem
   }
 
   function downloadStaticCsv(d) {
@@ -288,6 +327,11 @@
 
   function viewSchools() {
     const ov = S.ov;
+    if (!ov.ready && taskRunning('workbook')) {   // the sheet is being read: this page fills in by itself when it is done
+      app.replaceChildren(h('div', { class: 'panel' }, h('h2', null, 'Your school sheet is loading…'),
+        h('p', null, 'This takes about 30 seconds. You can stay here: the school list appears by itself as soon as it is ready.')));
+      return;
+    }
     if (!ov.ready) {
       app.replaceChildren(h('div', { class: 'panel' }, h('h2', null, 'No school list yet'),
         h('p', null, 'Load your School Information Sheet first on the Start here page.'),
@@ -478,6 +522,8 @@
       let added = 0;
       const bad = [];
       pick.disabled = true;
+      const tid = 'pages-add-' + s.id;
+      startTask(tid, `Adding ${files.length} saved page${files.length === 1 ? '' : 's'}…`, { message: s.name });
       for (const f of files) {
         say(`Adding “${f.name}”…`);
         const q = new URLSearchParams({ school: s.id, name: f.name });
@@ -485,19 +531,28 @@
         try { await checkedFetch('/api/manual-pages?' + q, { method: 'POST', headers: { 'X-Dashboard': '1', 'Content-Type': 'application/octet-stream' }, body: f }, 'That page could not be added.'); added++; } catch (e) { bad.push(`“${f.name}”: ${e.message}`); }
       }
       pick.disabled = false; input.value = ''; addr.value = '';
+      if (added) endTask(tid, { title: `${added} saved page${added === 1 ? '' : 's'} added`, message: (bad.length ? `${bad.length} could not be added. ` : '') + s.name, link: '#/school/' + encodeURIComponent(s.id), linkText: 'Open the school' });
+      else endTask(tid, { failed: true, title: 'No pages were added', message: bad.join(' '), link: '#/school/' + encodeURIComponent(s.id), linkText: 'Open the school' });
       await drawList();
       say((added ? `${added} page${added === 1 ? '' : 's'} added. ` : '') + (bad.length ? 'Not added: ' + bad.join(' ') : 'Press “Read these pages” when you have added them all.'), !added && bad.length > 0);
     }
     pick.onclick = () => input.click();
     input.onchange = () => { if (input.files.length) upload([...input.files]); };
     readBtn.onclick = async () => {
-      readBtn.disabled = true; say('Reading the saved pages. This takes a few seconds.');
+      readBtn.disabled = true; say('Reading the saved pages. This takes a few seconds. You can open other pages meanwhile.');
+      const tid = 'pages-read-' + s.id;
+      startTask(tid, 'Reading the saved pages…', { message: s.name });
       try {
         const r2 = await api('/api/manual-pages/build', { school: s.id });
         const mine = r2.schools.find((x) => x.id === s.id) || r2.schools[0] || {};
-        say(`Done. Read ${r2.pages} page${r2.pages === 1 ? '' : 's'}` + (mine.total ? ` and found ${mine.found} of ${mine.total} answers.` : '.'));
-        if (reload) setTimeout(reload, 900);
-      } catch (e) { say(e.message, true); readBtn.disabled = false; }
+        const result = `Read ${r2.pages} page${r2.pages === 1 ? '' : 's'}` + (mine.total ? ` and found ${mine.found} of ${mine.total} answers.` : '.');
+        say('Done. ' + result);
+        endTask(tid, { title: 'The saved pages were read', message: `${s.name}: ${result}`, link: '#/school/' + encodeURIComponent(s.id), linkText: 'Open the school' });
+        await loadOverview();
+        // refresh the school page only if the person is still looking at it
+        if (reload && S.view === 'school' && location.hash.startsWith('#/school/' + encodeURIComponent(s.id))) setTimeout(reload, 900);
+        else refreshIfOn('schools', 'review');
+      } catch (e) { endTask(tid, { failed: true, title: 'The saved pages could not be read', message: e.message }); say(e.message, true); readBtn.disabled = false; }
     };
     drawList();
     return h('details', { class: 'panel savedpages', open: blocked },
@@ -660,7 +715,14 @@
       } catch (e) { return alert(e.message); }
       if (!confirm(`Send what the website gave for “${s.name}” to the Google Sheet copy?\n\nBlank cells are filled. Cells that already have text are never overwritten: they get a note with the website’s value instead.`)) return;
       exportBtn.disabled = true; exportBtn.textContent = 'Sending…';
-      try { showExport(await api('/api/export', { id: s.id, tab: d.tabIndex })); exportBtn.textContent = 'Send to Google Sheet again'; } catch (e) {
+      const tid = 'sheet-send-' + s.id;
+      startTask(tid, `Sending ${s.name} to your Google Sheet…`, { message: 'You can open other pages meanwhile.' });
+      try {
+        const sent = await api('/api/export', { id: s.id, tab: d.tabIndex });
+        showExport(sent); exportBtn.textContent = 'Send to Google Sheet again';
+        endTask(tid, { title: 'Sent to your Google Sheet', message: s.name, link: safeUrl(sent.tabUrl), linkText: 'Open the tab' });
+      } catch (e) {
+        endTask(tid, { failed: true, title: 'Sending to the Google Sheet did not go through', message: e.message });
         exportBox.replaceChildren(h('div', { class: 'notice' }, h('b', null, 'Sending did not go through. '), e.message));
         exportBtn.textContent = d.exported ? 'Send to Google Sheet again' : 'Send to Google Sheet';
       }
@@ -834,10 +896,15 @@
 
   /** Downloads the file the Google Sheet's School Info menu loads. Resolves to { name, count, skipped }. */
   async function downloadExportFile(query) {
-    const r = await checkedFetch('/api/export-file?' + query, undefined, 'The file could not be made.');
-    const name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '') || [])[1] || 'school-info-export.json';
-    triggerBlobDownload(await r.blob(), name);
-    return { name, count: Number(r.headers.get('X-Export-Count')) || 0, skipped: Number(r.headers.get('X-Export-Skipped')) || 0, wrongSite: Number(r.headers.get('X-Export-Wrong-Site')) || 0 };
+    const id = 'file-' + (++taskSeq);
+    startTask(id, 'Making the file for your Google Sheet…');
+    try {
+      const r = await checkedFetch('/api/export-file?' + query, undefined, 'The file could not be made.');
+      const name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '') || [])[1] || 'school-info-export.json';
+      triggerBlobDownload(await r.blob(), name);
+      endTask(id, { title: `Saved ${name}`, message: 'It is in your Downloads folder. In your Google Sheet open School Info → Load export file… and pick it.' });
+      return { name, count: Number(r.headers.get('X-Export-Count')) || 0, skipped: Number(r.headers.get('X-Export-Skipped')) || 0, wrongSite: Number(r.headers.get('X-Export-Wrong-Site')) || 0 };
+    } catch (e) { dismissTask(id); throw e; }
   }
 
   /** Step-by-step Google Sheet menu tools and optional direct sync, kept out of the main flow. */
@@ -888,16 +955,22 @@
     async function send(file) {
       if (!file) return;
       if (!/\.xlsx$/i.test(file.name)) { say('Please choose an Excel file ending in .xlsx.', true); return; }
+      if (taskRunning('workbook')) { say('A sheet is already being read. It finishes in a moment.', true); return; }
       zone.classList.add('busy'); detail.hidden = true;
-      say(`Reading “${file.name}”. This takes about 30 seconds.`);
+      say(`Reading “${file.name}”. This takes about 30 seconds. You do not have to wait here: open any other page and it keeps going.`);
+      startTask('workbook', 'Loading your school sheet…', { message: file.name + '. You can keep using the dashboard.' });
       try {
         const r = await checkedFetch('/api/workbook', { method: 'POST', headers: { 'X-Dashboard': '1', 'Content-Type': 'application/octet-stream' }, body: file }, 'The upload did not work.');
         const j = await r.json().catch(() => ({}));
         await loadOverview();
+        endTask('workbook', { title: 'Your school sheet is loaded', message: (S.ov && S.ov.schools ? S.ov.schools.length : 0) + ' schools are ready.', link: '#/', linkText: 'Open the school list' });
         say('Done. Your school list is ready.');
         detail.textContent = j.output || ''; detail.hidden = !j.output;
-        if (onDone) onDone();
-      } catch (e) { say(e.message, true); } finally { zone.classList.remove('busy'); input.value = ''; }
+        refreshIfOn('start', 'schools', 'review', 'run');   // only the page the person is on, and only if it was waiting for the sheet
+      } catch (e) {
+        endTask('workbook', { failed: true, title: 'The school sheet could not be loaded', message: e.message, link: '#/start', linkText: 'Go to Start here' });
+        say(e.message, true);
+      } finally { zone.classList.remove('busy'); input.value = ''; }
     }
     zone.onclick = () => input.click();
     zone.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
@@ -907,15 +980,24 @@
     zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove('over'); send(e.dataTransfer.files[0]); };
     const reread = h('button', { class: 'btn link small', type: 'button' }, 'Re-read the file that is already loaded');
     reread.onclick = async () => {
-      reread.disabled = true; say('Reading the file again. This takes about 30 seconds.');
-      try { const j = await api('/api/import', {}); await loadOverview(); say('Done.'); detail.textContent = j.output || ''; detail.hidden = !j.output; if (onDone) onDone(); } catch (e) { say(e.message, true); }
+      if (taskRunning('workbook')) return;
+      reread.disabled = true; say('Reading the file again. This takes about 30 seconds. You can open other pages meanwhile.');
+      startTask('workbook', 'Reading your school sheet again…', { message: 'You can keep using the dashboard.' });
+      try {
+        const j = await api('/api/import', {}); await loadOverview(); say('Done.'); detail.textContent = j.output || ''; detail.hidden = !j.output;
+        endTask('workbook', { title: 'Your school sheet is loaded', message: (S.ov && S.ov.schools ? S.ov.schools.length : 0) + ' schools are ready.', link: '#/', linkText: 'Open the school list' });
+        refreshIfOn('start', 'schools', 'review', 'run');
+      } catch (e) { endTask('workbook', { failed: true, title: 'The school sheet could not be read', message: e.message }); say(e.message, true); }
       reread.disabled = false;
     };
+    // coming back to this page while the sheet is still being read: show that, instead of an empty box
+    const reading = taskRunning('workbook');
+    if (reading) { zone.classList.add('busy'); say('Your sheet is being read. This takes about 30 seconds. You can open other pages: it keeps going, and a message appears when it is ready.'); }
     return h('div', { class: 'panel stepcard' },
       h('div', { class: 'stephead' },
         h('span', { class: 'stepnum' }, '1'),
         h('h2', null, 'Load your school sheet'),
-        canReread ? chip(['Done', 'ok']) : chip(['Waiting for your file', 'warn'])),
+        reading ? chip(['Reading…', 'info']) : canReread ? chip(['Done', 'ok']) : chip(['Waiting for your file', 'warn'])),
       h('p', null, 'This is the list of schools the dashboard works from. In Google Sheets click File, then Download, then Microsoft Excel (.xlsx). Then choose that file below or drag it onto the box. Your own sheet is only read. It is never changed.'),
       zone, input, out, detail, canReread ? h('p', { class: 'muted small' }, reread) : null);
   }
@@ -929,8 +1011,10 @@
     async function add(file) {
       if (!file) return;
       if (!/\.zip$/i.test(file.name)) { say('Please choose a results file (its name ends in .zip).', true); return; }
+      if (taskRunning('results-import')) { say('A results file is already being added.', true); return; }
       zone.classList.add('busy');
-      say(`Adding the results in “${file.name}”…`);
+      say(`Adding the results in “${file.name}”… You can open other pages meanwhile.`);
+      startTask('results-import', 'Adding your teammate’s results…', { message: file.name });
       try {
         const r = await checkedFetch('/api/results-package', { method: 'POST', headers: { 'X-Dashboard': '1', 'Content-Type': 'application/octet-stream' }, body: file }, 'That did not work.');
         const j = await r.json().catch(() => ({}));
@@ -941,7 +1025,12 @@
         if (j.invalid) parts.push(`${j.invalid} skipped as damaged`);
         say('Added: ' + parts.join(', ') + '.' + (j.from && j.from.by ? ` From ${j.from.by}.` : ''));
         await loadOverview();
-      } catch (e) { say(e.message, true); } finally { zone.classList.remove('busy'); input.value = ''; }
+        endTask('results-import', { title: 'Your teammate’s results were added', message: parts.join(', ') + '.', link: '#/', linkText: 'Open the school list' });
+        refreshIfOn('start', 'schools', 'review');
+      } catch (e) {
+        endTask('results-import', { failed: true, title: 'The results file was not added', message: e.message });
+        say(e.message, true);
+      } finally { zone.classList.remove('busy'); input.value = ''; }
     }
     zone.onclick = () => input.click();
     zone.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
@@ -1358,7 +1447,8 @@
           pickSummary,
           h('div', { class: 'runbtns' }, startBtn),
           h('p', { class: 'muted small' }, 'The dashboard works on several schools at the same time, but only opens one page at a time from each school, so it never overloads a website. You can keep looking at schools in another tab while it works. Press Stop at any time: schools that are already finished stay saved.'),
-        ] : h('p', null, 'Load your sheet first on the ', h('a', { href: '#/start' }, 'Start here'), ' page.')),
+        ] : taskRunning('workbook') ? h('p', null, 'Your school sheet is loading. This page is ready as soon as it finishes: you can stay here.')
+          : h('p', null, 'Load your sheet first on the ', h('a', { href: '#/start' }, 'Start here'), ' page.')),
       h('div', { class: 'panel' },
         h('h2', null, 'Progress'),
         status, eta,
@@ -1990,6 +2080,7 @@
     const turn = { role: 'assistant', steps: [], proposals: [], sources: [], memory: [], text: '', usage: null, error: null, note: null, pending: true };
     ASK.items.push({ role: 'user', text: message }, turn);
     ASK.busy = true; ASK.ctrl = new AbortController();
+    startTask('ask', 'Ask is writing an answer…', { message: 'It keeps going if you open another page.', hideOnView: 'ask' });
     drawChat();
     try {
       const reqBody = { conversationId: ASK.id, message };
@@ -2017,6 +2108,8 @@
       if (!turn.text && !turn.error) turn.error = 'The connection ended before an answer arrived. Try again.';
     } catch (e) { turn.error = e.name === 'AbortError' ? 'Stopped.' : e.message; }
     turn.pending = false; ASK.busy = false; ASK.ctrl = null;
+    if (S.view === 'ask') dismissTask('ask');   // the person is looking at it: no message needed
+    else endTask('ask', { failed: !!turn.error && turn.error !== 'Stopped.', title: turn.error ? (turn.error === 'Stopped.' ? 'Ask was stopped' : 'Ask could not answer') : 'Ask has an answer', message: turn.error || 'Your question was answered.', link: '#/ask', linkText: 'Open Ask', hideOnView: 'ask' });
     await refreshAskMemoryAndSessions();
     drawChat(); drawBar();
   }
@@ -2135,7 +2228,7 @@
     app.replaceChildren(h('p', { class: 'loading' }, 'Loading…'));
     const qs = new URLSearchParams(Object.entries(S.rv).filter(([, v]) => v)).toString();
     const q = await api('/api/review-queue' + (qs ? '?' + qs : ''));
-    if (!q.ready) { setKids(app, h('div', { class: 'notice' }, 'Load your sheet and check some school websites first.')); return; }
+    if (!q.ready) { setKids(app, h('div', { class: 'notice' }, taskRunning('workbook') ? 'Your school sheet is loading. This page fills in by itself when it is ready.' : 'Load your sheet and check some school websites first.')); return; }
     const set = (k, v) => { S.rv[k] = v; viewReview(); };
     const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '—');
     const tier = h('select', { 'aria-label': 'Tier', onchange: (e) => set('tier', e.target.value) }, [['', 'All tiers'], ['1', 'Tier 1'], ['2', 'Tier 2'], ['3', 'Tier 3']].map(([v, t]) => h('option', { value: v, selected: S.rv.tier === v }, t)));
@@ -2310,6 +2403,7 @@
         h('blockquote', { class: 'letter' },
           'Hello, we are Cardinal Education. We keep a School Information Sheet for families, using only facts that are public on schools’ own websites. Our small program reads one page at a time, follows your robots.txt, and names itself “SchoolInfoSheetBot/1.0 (polite research crawler; reads public school pages only)”. Your website’s security check currently stops it. Could your web team allow that name, or send us your current fact sheet (tuition, dates, enrollment, class sizes)? Thank you.')),
       h('div', { class: 'panel', id: 'help-questions' }, h('h2', null, 'Common questions'),
+        h('details', null, h('summary', null, 'Do I have to wait while the sheet loads, or while websites are checked?'), h('p', null, 'No. Loading your sheet, checking websites, making a file, adding a teammate’s results and waiting for an Ask answer all keep going while you open other pages. A small card at the bottom right of every page shows what is running, and tells you when it is done with a link to the result. Checking websites also shows in the bar at the top. Just do not turn the dashboard off or close the browser window while something is running.')),
         h('details', null, h('summary', null, 'What do the yellow and orange cells in my Google Sheet mean?'), h('p', null, 'Yellow: a blank cell the dashboard filled in from the school’s website. Orange: your sheet already had a different answer, so nothing was overwritten and the website’s answer is in the cell’s note. Point at a cell to read its note. ', helpLink('colours', 'See the full colour key'), '.')),
         h('details', null, h('summary', null, 'Does the dashboard change my Google Sheet?'), h('p', null, 'No. It only reads the file you give it. You copy the answers yourself, or use the buttons to send answers to a copy of your sheet.')),
         h('details', null, h('summary', null, 'Why is an answer missing?'), h('p', null, 'Either the school does not publish it, or it is behind a login (such as an application portal), or the website is built in a way the dashboard cannot read. These are filled in by hand.')),
@@ -2331,6 +2425,8 @@
       // with no page chosen, open Start here until a sheet has been loaded, then the school list
       if (!view) view = !STATIC && S.ov && !S.ov.ready ? 'start' : 'schools';
       S.view = view;
+      for (const t of [...TASKS.values()]) if (t.hideOnView === view && t.state !== 'running') TASKS.delete(t.id);   // already seen on its own page
+      drawTasks();   // a card meant for another page (such as Ask's) hides itself on that page
       const TITLES = { start: 'Start here', run: 'Check websites', ask: 'Ask', accuracy: 'Accuracy', review: 'To check', help: 'Help', script: 'Technical details' };
       document.title = (view === 'school' ? 'School' : TITLES[view] || 'Schools') + ' · School Info Sheet';   // tells browser tabs apart
       document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.view === (view === 'school' ? 'schools' : view)));
@@ -2367,7 +2463,15 @@
       drawJob();
       if (was && !j.running) {
         await loadOverview();
-        if (S.view !== 'run') route();
+        if (S.view !== 'run') {
+          // say it is finished wherever the person is, and only refresh pages that show the results (never the Ask page or a school they are reading)
+          const bad = !!j.exitCode && !j.stopped;
+          endTask('checking', {
+            failed: bad, title: j.stopped ? 'Checking was stopped' : bad ? 'Checking stopped early' : 'Checking the websites is finished',
+            message: `${j.done || 0} of ${j.schools || '?'} schools checked.`, link: '#/', linkText: 'Open the school list',
+          });
+          refreshIfOn('schools', 'review', 'start');
+        }
       } else if (j.running && S.view === 'schools' && Date.now() - lastOverview > 30000 && !(document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName))) {
         // while a check runs, the list fills in as schools finish
         await loadOverview();

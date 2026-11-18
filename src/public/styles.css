@@ -429,6 +429,23 @@ th, td { padding: 10px 10px; }
 td.name { min-width: 230px; }
 td.name .sub { margin-top: 2px; }
 .meter { width: 44px; margin-right: 6px; }
+/* what is running or just finished, shown on every page so nobody has to wait on one page */
+.tasks { position: fixed; right: 18px; bottom: 18px; z-index: 40; display: flex; flex-direction: column; gap: 10px; width: min(380px, calc(100vw - 36px)); pointer-events: none; }
+.taskcard { pointer-events: auto; display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-strong); border-left: 5px solid var(--info); box-shadow: 0 6px 24px rgba(0, 0, 0, .22); }
+.taskcard.done { border-left-color: var(--ok); }
+.taskcard.failed { border-left-color: var(--bad); }
+.taskicon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; font-weight: 700; font-size: 13px; background: var(--mute-bg); color: var(--ink); }
+.taskcard.done .taskicon { background: var(--ok-bg); color: var(--ok); }
+.taskcard.failed .taskicon { background: var(--bad-bg); color: var(--bad); }
+.taskicon.spin { border: 3px solid var(--line-strong); border-top-color: var(--info); background: transparent; animation: taskspin .9s linear infinite; }
+@keyframes taskspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .taskicon.spin { animation: none; } }
+.tasktext { flex: 1; min-width: 0; font-size: 14px; line-height: 1.4; }
+.tasktext b { display: block; }
+.tasktext span { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.tasktext a { display: inline-block; margin-top: 4px; font-weight: 600; }
+.taskx { all: unset; cursor: pointer; flex: none; padding: 0 4px; font-size: 14px; color: var(--muted); }
+.taskx:hover { color: var(--ink); }
 .savedlist { list-style: none; margin: 10px 0 0; padding: 0; }
 .savedlist li { padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .savedlist li .sub { margin-top: 2px; }

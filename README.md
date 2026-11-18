@@ -74,3 +74,4 @@ precious except `results/` (what the scraper found). `data/cache/` only saves ti
 - **A− / A+** make the text smaller or bigger, and **Light / Dark** switches the page colours. Both are remembered on that computer.
 - A **next step** card on Start here and Schools says the one thing to do next (load the sheet, check schools, look at the answers it is unsure about, or download).
 - The Schools table fits a normal screen: the website link and "sent to Google Sheet" time sit under each school's name.
+- Nothing makes you wait on one page. Loading the sheet, checking websites, making a file, adding a teammate's results and an Ask answer keep going while you open other pages. A card at the bottom right of every page shows what is running and says when it is done, with a link to the result.
