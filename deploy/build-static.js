@@ -85,6 +85,7 @@ const swaps = [
   ['src="/app.js"', 'src="app.js"'],
   ['<title>School Info Sheet</title>', '<title>School Info Sheet (read-only)</title>\n<meta name="robots" content="noindex, nofollow">'],
   ['    <a href="#/run" data-view="run" title="Read the schools’ websites">Check websites</a>\n', ''],
+  ['    <a href="#/sources" data-view="sources" title="Answers from Ravenna, Niche and review sites, from pages you saved by hand">Ravenna &amp; reviews</a>\n', ''],   // saving pages needs the server
   ['    <a href="#/start" data-view="start">Start here</a>\n', ''],
   ['    <a href="#/ask" data-view="ask" title="Ask the AI assistant a question about the schools">Ask</a>\n', ''],           // the read-only copy has no server, so no assistant
   ['    <a href="#/accuracy" data-view="accuracy" title="How often the answers are right">Accuracy</a>\n', ''],   // nor spot-checks

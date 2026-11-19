@@ -198,7 +198,8 @@ async function build({ school, schools, now = new Date() }) {
     try { fields = extractSchool(s, crawl, now); } catch (e) { out.push({ id: s.id, name: s.name, error: e.message }); continue; }
     let identity = null;
     try { identity = siteIdentity(s, crawl.pages.filter((p) => p.ok)); } catch { /* the check is only a warning */ }
-    const prev = readJson(outFile, null);
+    const prev0 = readJson(outFile, null);
+    const prev = prev0 && prev0.websiteFields ? { ...prev0, fields: prev0.websiteFields } : prev0;   // answers from Niche, Ravenna ... are not website updates
     const changes = diffFields(prev, fields);
     const counts = summarize(fields);
     writeJson(outFile, {
@@ -209,7 +210,9 @@ async function build({ school, schools, now = new Date() }) {
       pages: crawl.pages.map((p) => ({ url: p.finalUrl, title: p.title || p.linkText || '', topics: p.topics || [], kind: p.kind, chars: p.mainChars || 0, fetchedAt: p.fetchedAt })),
       portals: crawl.portals, skipped: [], fields,
     });
-    out.push({ id: s.id, name: s.name, found: counts.found, total: counts.found + counts.none });
+    let found = counts.found;
+    try { const o = await require('./sources').reapply(s, now); if (o) found = o.counts.found; } catch { /* the website answers are saved either way */ }
+    out.push({ id: s.id, name: s.name, found, total: counts.found + counts.none });
   }
   return { pages: crawl.pages.length, schools: out };
 }
@@ -217,4 +220,4 @@ async function build({ school, schools, now = new Date() }) {
 /** A normal check that fails (the site still blocks us) must not wipe out answers read from pages saved by hand. */
 const keepSavedPages = (prev, crawl) => !!(prev && prev.source === 'saved-pages' && prev.status === 'ok' && crawl && crawl.status !== 'ok');
 
-module.exports = { addFile, list, remove, build, keepSavedPages, groupKey, ManualPagesError, MAX_FILE_BYTES, MAX_FILES };
+module.exports = { addFile, list, remove, build, keepSavedPages, groupKey, ManualPagesError, MAX_FILE_BYTES, MAX_FILES, decode, addressInHtml };

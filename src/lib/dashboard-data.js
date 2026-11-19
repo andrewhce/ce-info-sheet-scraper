@@ -15,6 +15,7 @@ const CODE = [
     ['src/launch.js', 'Starts the dashboard quietly in the background on Windows without keeping a terminal window open.'],
     ['src/scrape.js', 'The scraper. Picks the schools, reads each website once, applies the rules, saves the results.'],
     ['src/import-workbook.js', 'Reads your Excel sheet: the template, the PSTP Schools list and the existing school tabs.'],
+    ['src/lib/school-list.js', 'Adds one school by hand (and removes it again) without loading the whole sheet; schools added this way survive a new sheet.'],
     ['src/setup-check.js', 'The checklist on the Start here page, also run by Check Setup.cmd.'],
     ['src/lib/xlsx-lean.js', 'Loads the big Excel sheet with a fraction of the memory, by cutting each tab down to the part that is read.'],
     ['src/lib/scheduler.js', 'Built-in auto-scraper schedule stored in data/schedule.json and triggered automatically by the server.'],
@@ -37,6 +38,9 @@ const CODE = [
     ['src/lib/browser-fetch.js', 'Optional local Chrome/Edge renderer for empty JavaScript-only pages (obeys robots.txt and never bypasses blocks).'],
     ['src/lib/html.js', 'Turns a page or PDF into plain text blocks, keeping headings, lists and tables.'],
     ['src/lib/textindex.js', 'Builds the facts, sentences and sections that the rules search.'],
+    ['src/lib/manual-pages.js', 'Pages saved by hand from a school website that blocks automatic reading; read with the same rules.'],
+    ['src/lib/sources.js', 'Pages saved by hand from Ravenna, Niche and the review sites: checks them, keeps them, and fills only the questions the website left empty, in that order.'],
+    ['src/lib/source-readers.js', 'Reads the labelled facts (ratio, tuition, grades ...) from those saved pages, with the line they came from.'],
   ]],
   ['Deciding what each row says', [
     ['src/lib/rules.js', 'The field rules: one rule per row of the Master Template.'],
@@ -210,6 +214,8 @@ function schoolPayload(id, tabIndex = 0, opts) {
       changedAt: result.changedAt || null,
       // answers read from pages a person saved by hand (for a website that refuses automatic reading)
       source: result.source || null, savedPages: result.savedPages || null, lastAttempt: result.lastAttempt || null,
+      // answers filled from pages saved by hand from Ravenna, Niche and the review sites (lib/sources.js)
+      websiteStatus: result.websiteStatus || null, otherSources: result.otherSources || null,
     } : null,
     rows: cmp.rows, counts: cmp.counts, trustCounts: cmp.trustCounts,
   };

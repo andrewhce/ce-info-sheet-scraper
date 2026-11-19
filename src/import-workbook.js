@@ -10,6 +10,7 @@ const path = require('path');
 const { loadWorkbookLean } = require('./lib/xlsx-lean');
 const { PATHS, loadConfig, resolveWorkbook, readJson, writeJson, slug, alnum, squash } = require('./lib/util');
 const { keyRows } = require('./lib/template');
+const { mergeAdded } = require('./lib/school-list');
 
 function cellText(cell) {
   let v = cell.value;
@@ -263,7 +264,10 @@ async function main() {
       })),
     });
   }
-  writeJson(PATHS.schools, { importedAt: new Date().toISOString(), workbook: file, schools });
+  // schools added by hand (Schools page, "Add a school") stay on the list unless the sheet now lists them itself
+  const withAdded = mergeAdded(schools);
+  writeJson(PATHS.schools, { importedAt: new Date().toISOString(), workbook: file, schools: withAdded.schools });
+  if (withAdded.kept) console.log(`Schools added by hand and kept: ${withAdded.kept}`);
 
   const noTab = schools.filter((s) => !s.tabs.length);
   const orphan = tabs.filter((t) => !t.school);

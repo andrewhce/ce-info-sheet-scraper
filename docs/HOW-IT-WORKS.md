@@ -2,14 +2,16 @@
 
 ## What it does and does not do
 
-- Reads only the school's **own website** and the PDFs it links to (fact sheets, school profiles). It does not read
-  third-party sites such as Niche.
+- Reads the school's **own website** and the PDFs it links to (fact sheets, school profiles) by itself. It never fetches
+  third-party sites such as Niche. A person can add pages saved by hand from Ravenna, Niche, Private School Review and
+  Boarding School Review, and those only fill what the website left empty, in that order (docs/SOURCES.md).
 - Uses **fixed rules, no AI**. Every answer shows the page it came from, the exact words it matched, and a confidence mark
   (high, medium, low). Check low-confidence answers before using them.
 - Obeys each site's `robots.txt`, identifies itself honestly, pauses between pages, and reads at most 40 pages and 4 PDFs
   per website. A site that refuses automated visits is marked "Blocked by site" and left alone.
 - **Cannot log in.** Anything that exists only inside an admissions portal (Ravenna, Gateway and so on), such as the exact
-  essay prompts, will not be found.
+  essay prompts, will not be found automatically. For Ravenna a person signs in, saves the page and adds the file on the
+  **Ravenna & reviews** page.
 - Two template rows are never looked up: Further Notes and Peer Schools. Homework hours usually come from third-party
   sites, so they are almost always blank.
 - Paragraph rows (application steps, interviews, essays, events) are copied sections of the school's page, not summaries.
@@ -95,7 +97,9 @@ so they never touch your real accounts. The first needs your workbook to be load
 | `tools/make-portable.js` | Builds the folder you send to teammates. |
 | `src/auth.js` | Company Google sign-in and the server settings, for running online. |
 | `src/scrape.js` | The scraper. |
-| `src/import-workbook.js` | Reads your Excel sheet. |
+| `src/import-workbook.js` | Reads your Excel sheet. Schools added by hand stay on the list. |
+| `src/lib/school-list.js` | Adds or removes one school without loading the whole sheet again. |
+| `src/lib/sources.js`, `source-readers.js` | Pages saved by hand from Ravenna, Niche and the review sites: checking them, reading the facts, and filling the questions the website left empty (docs/SOURCES.md). |
 | `src/setup-check.js` | The checklist. |
 | `src/lib/` | `crawl`, `fetcher`, `html`, `textindex` (reading websites); `rules`, `template`, `compare` (deciding what each row says); `dashboard-data`, `util` (shared); `sheet-export`, `access-check` (optional extras). |
 | `src/public/` | The dashboard pages (`index.html`, `app.js`, `styles.css`). |

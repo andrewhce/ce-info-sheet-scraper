@@ -19,6 +19,7 @@ const { extractSchool } = require('./lib/rules');
 const { siteIdentity } = require('./lib/identity');
 const { diffFields } = require('./lib/changes');
 const { keepSavedPages } = require('./lib/manual-pages');
+const sources = require('./lib/sources');   // answers from pages saved by hand from Ravenna, Niche and the review sites fill what the website left empty
 const scheduler = require('./lib/scheduler');
 const { createSlack } = require('./lib/slack');
 
@@ -129,7 +130,9 @@ async function main() {
   for (const s of targets) {
     if (!s.website) {
       writeJson(path.join(PATHS.resultsDir, s.id + '.json'), { id: s.id, name: s.name, scrapedAt: now.toISOString(), scraperVersion: SCRAPER_VERSION, status: 'no-website', detail: 'The list has no website link for this school.', pages: [], fields: {} });
-      emit({ type: 'school-done', id: s.id, name: s.name, status: 'no-website', found: 0, total: 0 });
+      let other = null;
+      try { other = await sources.reapply(s, now); } catch { /* nothing saved from other sources */ }
+      emit({ type: 'school-done', id: s.id, name: s.name, status: other ? 'ok' : 'no-website', found: other ? other.counts.found : 0, total: other ? other.counts.found + other.counts.none : 0 });
       continue;
     }
     let start;
@@ -182,7 +185,8 @@ async function main() {
         let identity = null;
         if (crawl.status === 'ok') { try { identity = siteIdentity(s, crawl.pages.filter((p) => p.ok)); } catch { /* the check is only a warning */ } }
         const outFile = path.join(PATHS.resultsDir, s.id + '.json');
-        const prev = readJson(outFile, null);
+        const prev0 = readJson(outFile, null);
+        const prev = prev0 && prev0.websiteFields ? { ...prev0, fields: prev0.websiteFields } : prev0;   // answers from other sources are not website updates
         const changes = crawl.status === 'ok' ? diffFields(prev, fields) : [];
         const stamp = new Date().toISOString();
         const changedAt = changes.length ? stamp : (prev && prev.changedAt || null);
@@ -193,6 +197,12 @@ async function main() {
           pages: crawl.pages.map((p) => ({ url: p.finalUrl, title: p.title || p.linkText || '', topics: p.topics || [], kind: p.kind, chars: p.mainChars || 0, fetchedAt: p.fetchedAt })),
           portals: crawl.portals, skipped: crawl.skipped, fields,
         });
+        // pages saved by hand from Ravenna, Niche ... fill what the website left empty (and keep an unreadable website from hiding them)
+        let status = crawl.status, detail = crawl.detail, found = counts.found, total = counts.found + counts.none;
+        try {
+          const other = await sources.reapply(s, now);
+          if (other) { status = 'ok'; detail = null; found = other.counts.found; total = other.counts.found + other.counts.none; }
+        } catch { /* the website answers are saved either way */ }
         doneSchools++;
         if (dueSchedule && changes.length) {
           scheduledChanges.push({
@@ -203,8 +213,8 @@ async function main() {
           });
         }
         emit({
-          type: 'school-done', id: s.id, name: s.name, status: crawl.status, detail: crawl.detail,
-          found: counts.found, total: counts.found + counts.none,
+          type: 'school-done', id: s.id, name: s.name, status, detail,
+          found, total,
           changesCount: changes.length, changes, wrongSite: !!(identity && identity.ok === false),
           done: doneSchools, of: targets.length,
         });

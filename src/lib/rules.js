@@ -1125,4 +1125,4 @@ function extractSchool(school, crawl, now = new Date()) {
   return fields;
 }
 
-module.exports = { extractSchool, divisionFit, gradeSpans, findDates };
+module.exports = { extractSchool, divisionFit, gradeSpans, findDates, TYPE_WORDS, SPORTS };

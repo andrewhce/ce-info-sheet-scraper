@@ -66,6 +66,8 @@ function createTools(deps) {
       value: clean(sc.value, valueMax), confidence: sc.confidence,
       quote: quoteMax && sc.snippet ? clean(sc.snippet, quoteMax) : undefined,
       source_url: src ? src.url : undefined, source_title: quoteMax && src && src.title ? clean(src.title, 70) : undefined,
+      // set when the school's own website did not give this answer: it came from a page saved by hand from Ravenna, Niche or a review site
+      source_site: sc.source && sc.source.label ? sc.source.label : undefined,
       note: sc.note ? clean(sc.note, 150) : undefined,
     };
   }

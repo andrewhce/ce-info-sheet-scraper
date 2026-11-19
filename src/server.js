@@ -23,6 +23,8 @@ const { createAssistant, AskError } = require('./agent');
 const { createVerification, VerificationError } = require('./lib/verification');
 const reviewQueue = require('./lib/review-queue');
 const manualPages = require('./lib/manual-pages');   // pages a person saved by hand, for websites that refuse automatic reading
+const sources = require('./lib/sources');            // pages saved by hand from Ravenna, Niche and the review sites: they fill what the website left empty
+const schoolList = require('./lib/school-list');     // adding one school without loading the whole sheet again
 
 const cfg = loadConfig();
 const verification = createVerification({ data });   // spot-checks and the accuracy figures built from them
@@ -267,6 +269,41 @@ async function receiveSavedPage(req, res, user, url) {
   }
 }
 
+/** A page saved from Ravenna, Niche or a review site arrives as the raw request body. `auto=1` finds the school from the page itself. */
+async function receiveSourcePage(req, res, user, url) {
+  const chunks = [];
+  let size = 0, tooBig = false;
+  await new Promise((resolve, reject) => {
+    req.on('data', (c) => { size += c.length; if (size > sources.MAX_FILE_BYTES) tooBig = true; else chunks.push(c); });
+    req.on('end', resolve); req.on('error', reject);
+  }).catch(() => { tooBig = null; });
+  if (tooBig === null) return send(res, 400, { error: 'The upload was interrupted. Please try again.' });
+  if (tooBig) return send(res, 413, { error: 'That file is bigger than 15 MB.' });
+  const q = url.searchParams;
+  const bytes = Buffer.concat(chunks), source = q.get('source') || '', name = q.get('name') || 'page';
+  try {
+    const list = data.getSchools();
+    if (!list) throw new sources.SourcePagesError('Load your School Information Sheet first.', 400);
+    let school;
+    if (q.get('auto') === '1') {
+      const m = sources.matchSchool({ name, bytes }, list.schools);
+      if (!m.school) return send(res, 409, { error: m.candidates.length ? 'Several schools fit this page. Add it from the school’s own row.' : 'Could not tell which school this page is for. Add it from the school’s own row.', candidates: m.candidates.map((s) => ({ id: s.id, name: s.name })) });
+      school = m.school;
+    } else {
+      school = list.schools.find((s) => s.id === String(q.get('school') || ''));
+      if (!school) throw new sources.SourcePagesError('That school was not found.', 404);
+    }
+    const entry = await sources.addFile({ school, source, name, bytes, url: q.get('page') || '' });
+    const applied = await sources.reapply(school);
+    data.clearCache();
+    audit(user, `added a saved ${sources.SOURCES[source].label} page for ${school.name}: ${entry.name}`);
+    return send(res, 200, { entry, school: { id: school.id, name: school.name }, filled: applied ? Object.values(applied.filled).flat().length : 0 });
+  } catch (e) {
+    if (e instanceof sources.SourcePagesError) return send(res, e.status, { error: e.message });
+    throw e;
+  }
+}
+
 async function receiveResults(req, res, user) {
   const MAX = 100 * 1024 * 1024;
   const chunks = [];
@@ -312,8 +349,43 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/workbook') { audit(user, 'is loading a new School Information Sheet'); return await receiveWorkbook(req, res); }
       if (p === '/api/results-package') return await receiveResults(req, res, user);
       if (p === '/api/manual-pages') return await receiveSavedPage(req, res, user, url);
+      if (p === '/api/sources/page') return await receiveSourcePage(req, res, user, url);
       if (!/^application\/json/i.test(req.headers['content-type'] || '')) return send(res, 403, { error: 'forbidden' });
       const body = await readBody(req);
+      // ---- one school at a time, without loading the whole sheet again ----
+      if (p === '/api/schools/add' || p === '/api/schools/remove') {
+        if ((job && job.running) || externalRun()) return send(res, 409, { error: 'Wait for the running check to finish first.' });
+        try {
+          if (p === '/api/schools/add') {
+            const school = schoolList.addSchool(body);
+            data.clearCache();
+            audit(user, `added the school ${school.name}`);
+            return send(res, 200, { ok: true, school });
+          }
+          const gone = schoolList.removeSchool(body.id);
+          sources.removeAll(gone);
+          data.clearCache();
+          audit(user, `removed the school ${gone.name}`);
+          return send(res, 200, { ok: true });
+        } catch (e) {
+          if (e instanceof schoolList.SchoolListError || e instanceof sources.SourcePagesError) return send(res, e.status, { error: e.message });
+          throw e;
+        }
+      }
+      // ---- pages saved from Ravenna, Niche and the review sites ----
+      if (p === '/api/sources/remove') {
+        try {
+          const school = schoolById(body.school);
+          sources.remove(school, String(body.source || ''), body.id);
+          await sources.reapply(school);
+          data.clearCache();
+          audit(user, `removed a saved ${(sources.SOURCES[body.source] || {}).label || ''} page for ${school.name}`);
+          return send(res, 200, sources.list(school, String(body.source)));
+        } catch (e) {
+          if (e instanceof sources.SourcePagesError || e instanceof manualPages.ManualPagesError) return send(res, e.status || 422, { error: e.message });
+          throw e;
+        }
+      }
       // ---- pages saved by hand, for websites that refuse automatic reading ----
       if (p === '/api/manual-pages/remove' || p === '/api/manual-pages/build') {
         try {
@@ -558,6 +630,22 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/manual-pages') {
       try { return send(res, 200, manualPages.list(schoolById(url.searchParams.get('school')))); } catch (e) {
         if (e instanceof manualPages.ManualPagesError) return send(res, 422, { error: e.message });
+        throw e;
+      }
+    }
+    if (p === '/api/sources') {
+      const list = data.getSchools();
+      if (!list) return send(res, 200, { ready: false });
+      return send(res, 200, {
+        ready: true,
+        sources: sources.ORDER.map((k) => ({ key: k, label: sources.SOURCES[k].label, rank: sources.SOURCES[k].rank, blurb: sources.SOURCES[k].blurb })),
+        schools: list.schools.map((s) => ({ id: s.id, name: s.name, tier: s.tier, region: s.region, website: s.website, portal: s.portal, portalLabel: s.portalLabel, division: s.division, addedByHand: !!s.addedByHand })),
+        pages: sources.overview(),
+      });
+    }
+    if (p === '/api/sources/pages') {
+      try { return send(res, 200, sources.list(schoolById(url.searchParams.get('school')), String(url.searchParams.get('source') || ''))); } catch (e) {
+        if (e instanceof sources.SourcePagesError || e instanceof manualPages.ManualPagesError) return send(res, e.status || 422, { error: e.message });
         throw e;
       }
     }

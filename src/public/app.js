@@ -477,6 +477,7 @@
         h('p', null, 'Every school in your sheet. The dashboard reads each school’s own website and shows what it found next to what your sheet says. Click a number card to show only those schools, or click a school to see its answers and copy them. ', helpLink('status', 'What do the labels mean?')),
         STATIC && ov.generatedAt ? h('p', { class: 'snapshot' }, `Read-only copy of the results as of ${new Date(ov.generatedAt).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}. It does not update by itself.`) : null)),
       nextStepCard(),
+      addSchoolPanel(),
       h('div', { class: 'stats', role: 'group', 'aria-label': 'Quick filters' },
         statBtn('', ov.schools.length, 'all schools'),
         statBtn('ok', scraped.length, 'checked', 'Schools whose website has been read'),
@@ -495,7 +496,7 @@
   // The dashboard does not try to get past a website's security check. A person opens the school's pages in their own
   // browser, saves them, and adds the files here; the dashboard reads them the same way it reads any website.
   function savedPagesPanel(s, r, reload) {
-    const blocked = !r || r.status !== 'ok';
+    const blocked = !r || r.status !== 'ok' || !!(r.websiteStatus && r.websiteStatus.status !== 'ok');
     const out = h('p', { class: 'small' });
     const say = (msg, bad) => { out.textContent = msg; out.className = 'small ' + (bad ? 'bad' : 'good'); };
     const listBox = h('div');
@@ -567,6 +568,331 @@
       h('label', { class: 'field' }, h('span', null, 'Web address of the page (optional, used when you add one file at a time)'), addr),
       h('div', { class: 'runbtns' }, pick, input, readBtn), out, listBox,
       h('p', { class: 'muted small' }, 'These pages are shared by every school on the same website (for example the middle and upper school). ', helpLink('blocked', 'More about blocked websites'), '.'));
+  }
+
+  // ----------------------------------------------- adding one school without loading the whole sheet again ---
+  function addSchoolPanel() {
+    if (STATIC) return null;
+    const just = S.justAdded; S.justAdded = null;
+    const msg = h('p', { class: 'small' });
+    const say = (t, bad) => { msg.textContent = t; msg.className = 'small ' + (bad ? 'bad' : 'good'); };
+    const field = (label, input) => h('label', { class: 'field' }, h('span', null, label), input);
+    const name = h('input', { type: 'text', maxlength: '120', placeholder: 'For example: Westbrook Academy (Upper) School', autocomplete: 'off', 'aria-label': 'School name' });
+    const site = h('input', { type: 'text', placeholder: 'https://www.school.org', autocomplete: 'off', 'aria-label': 'School website' });
+    const tier = h('select', { 'aria-label': 'Tier' }, [['', 'Not sure yet'], ['1', 'Tier 1'], ['2', 'Tier 2'], ['3', 'Tier 3']].map(([v, t]) => h('option', { value: v }, t)));
+    const region = h('input', { type: 'text', maxlength: '80', placeholder: 'For example: San Francisco, CA', autocomplete: 'off', 'aria-label': 'Region' });
+    const portal = h('input', { type: 'text', placeholder: 'Ravenna or other application link (optional)', autocomplete: 'off', 'aria-label': 'Application portal link' });
+    const add = h('button', { class: 'btn primary', type: 'button' }, 'Add this school');
+    const done = h('div');
+    const running = !!(S.job && S.job.running);
+    if (just) {
+      setKids(done, h('div', { class: 'notice ok' }, h('b', null, `“${just.name}” was added.`), ' It is on the school list now. Next:',
+        h('div', { class: 'runbtns' },
+          h('button', { class: 'btn primary', type: 'button', disabled: running || !just.website, title: just.website ? null : 'This school has no website address yet', onclick: () => startRun({ scope: 'schools', ids: [just.id] }) }, 'Read its website now'),
+          h('a', { class: 'btn', href: '#/school/' + encodeURIComponent(just.id) }, 'Open the school'),
+          h('a', { class: 'btn', href: '#/sources/ravenna', onclick: () => { S.srcQ = just.name; } }, 'Add its Ravenna / Niche pages'))));
+    }
+    add.onclick = async () => {
+      add.disabled = true; say('Adding…');
+      try {
+        const r = await api('/api/schools/add', { name: name.value, website: site.value, tier: tier.value, region: region.value, portal: portal.value });
+        S.justAdded = r.school;
+        await loadOverview();
+        viewSchools();
+      } catch (e) { say(e.message, true); add.disabled = false; }
+    };
+    return h('details', { class: 'panel addschool', open: !!just },
+      h('summary', null, 'Add a school that is not in your sheet'),
+      h('p', null, 'A new school does not need the whole School Information Sheet to be loaded again. Type its name and website here and it joins the list. If you load the whole sheet later, schools added here stay on the list unless the sheet lists them itself.'),
+      h('div', { class: 'addform' }, field('School name (required)', name), field('Website', site), field('Tier', tier), field('Region', region), field('Application portal link', portal)),
+      h('div', { class: 'runbtns' }, add), msg, done);
+  }
+
+  // ------------------------------------- Ravenna, Niche and the review sites: pages a person saved by hand ---
+  // The school's own website is read first. These pages only fill what the website did not answer. They are never fetched
+  // by the dashboard (Niche blocks automatic readers, Private School Review's terms forbid them, Ravenna needs a login):
+  // a person saves the page in their own browser and adds the file here.
+  const SRC_HOST = { niche: 'niche.com', psr: 'privateschoolreview.com', bsr: 'boardingschoolreview.com' };
+  const OTHER_LABEL = { ravenna: 'Ravenna', niche: 'Niche', psr: 'Private School Review', bsr: 'Boarding School Review' };
+  async function viewSources(sourceKey) {
+    if (STATIC) return;
+    app.replaceChildren(h('p', { class: 'loading' }, 'Loading…'));
+    let d;
+    try { d = await api('/api/sources'); } catch (e) { app.replaceChildren(h('div', { class: 'notice' }, e.message)); return; }
+    if (!d.ready) { app.replaceChildren(h('div', { class: 'panel' }, h('h2', null, 'No school list yet'), h('p', null, 'Load your School Information Sheet first on the Start here page.'), h('a', { class: 'btn primary', href: '#/start' }, 'Go to Start here'))); return; }
+    const key = d.sources.some((x) => x.key === sourceKey) ? sourceKey : 'ravenna';
+    const src = d.sources.find((x) => x.key === key);
+    const SS = S.src || (S.src = { q: '', show: 'all' });
+    if (S.srcQ != null) { SS.q = S.srcQ; S.srcQ = null; }
+    const results = h('ul', { class: 'savedlist droplog' });
+    const tbody = h('tbody');
+    const countEl = h('span', { class: 'muted small' });
+    const summaryEl = h('p', { class: 'small muted' });
+
+    const savedCount = (k) => Object.values(d.pages).filter((p) => p[k]).length;
+    const tabCounts = new Map();
+    const tabs = h('div', { class: 'srctabs', role: 'tablist', 'aria-label': 'Source' }, d.sources.map((x) => {
+      const n = h('b', null, ` ${savedCount(x.key)}`);
+      tabCounts.set(x.key, n);
+      return h('button', { type: 'button', role: 'tab', 'aria-selected': String(x.key === key), class: 'chip tab' + (x.key === key ? ' on' : ''),
+        title: 'Schools with saved pages', onclick: () => { location.hash = '#/sources/' + x.key; } }, x.label, n);
+    }));
+
+    const linkFor = (s) => {
+      if (key === 'ravenna') {
+        return s.portalLabel === 'Ravenna' && safeUrl(s.portal) ? ext(s.portal, 'Open in Ravenna') : h('span', { class: 'muted small' }, 'Not a Ravenna school in your list');
+      }
+      return ext('https://www.google.com/search?q=' + encodeURIComponent(`${s.name} ${SRC_HOST[key]}`), `Find on ${src.label}`);
+    };
+
+    async function upload(files, school, log) {
+      let added = 0, filled = 0;
+      for (const f of files) {
+        const q = new URLSearchParams({ source: key, name: f.name });
+        if (school) q.set('school', school.id); else q.set('auto', '1');
+        try {
+          const r = await (await checkedFetch('/api/sources/page?' + q, { method: 'POST', headers: { 'X-Dashboard': '1', 'Content-Type': 'application/octet-stream' }, body: f }, 'That page could not be added.')).json();
+          added++; filled += r.filled || 0;
+          log(`✓ “${f.name}”${school ? '' : ' → ' + r.school.name}: added` + (r.entry.warning ? ` (check: ${r.entry.warning})` : ''), false);
+        } catch (e) { log(`✗ “${f.name}”: ${e.message}`, true); }
+      }
+      if (added) { try { d = await api('/api/sources'); } catch { /* the table keeps showing the old counts */ } drawTable(); }
+      return { added, filled };
+    }
+
+    const logLine = (text, bad) => results.prepend(h('li', { class: bad ? 'bad' : 'good' }, text));
+    const dropInput = h('input', { type: 'file', multiple: true, accept: '.html,.htm,.pdf', hidden: true, 'aria-label': 'Choose the pages you saved' });
+    const drop = h('div', { class: 'dropzone', tabindex: '0', role: 'button', 'aria-label': `Add several saved ${src.label} pages at once` },
+      h('b', null, `Add many saved ${src.label} pages at once`),
+      h('span', null, 'Drag the saved files here, or click to choose them. Each page is matched to its school by the school’s name on the page. Pages that cannot be matched are listed so you can add them from the school’s own row below.'));
+    const run = async (files) => {
+      if (!files.length) return;
+      const tid = 'src-bulk';
+      startTask(tid, `Adding ${files.length} saved ${src.label} page${files.length === 1 ? '' : 's'}…`);
+      const r = await upload(files, null, logLine);
+      endTask(tid, { title: `${r.added} of ${files.length} pages added`, message: r.added ? `${r.filled} answer${r.filled === 1 ? '' : 's'} filled in.` : 'None could be added. See the list on the page.', failed: !r.added });
+    };
+    drop.onclick = () => dropInput.click();
+    drop.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dropInput.click(); } };
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+    drop.ondragleave = () => drop.classList.remove('over');
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); run([...e.dataTransfer.files]); };
+    dropInput.onchange = () => { const fs = [...dropInput.files]; dropInput.value = ''; run(fs); };
+
+    function rowFor(s) {
+      const mine = (d.pages[s.id] || {})[key];
+      const detail = h('div', { class: 'srcdetail', hidden: true });
+      const msg = h('div', { class: 'small' });
+      const input = h('input', { type: 'file', multiple: true, accept: '.html,.htm,.pdf', hidden: true, 'aria-label': `Choose ${src.label} pages for ${s.name}` });
+      const addBtn = h('button', { class: 'btn small', type: 'button', onclick: () => input.click() }, mine ? 'Add another…' : 'Add page…');
+      input.onchange = async () => {
+        const files = [...input.files]; input.value = '';
+        addBtn.disabled = true;
+        const lines = [];
+        const r = await upload(files, s, (t, bad) => lines.push([t, bad]));
+        // the table was redrawn if something was added; show the outcome on the new row of the same school
+        const again = tbody.querySelector(`[data-school="${s.id}"] .srcmsg`);
+        const box = again || msg;
+        setKids(box, lines.map(([t, bad]) => h('div', { class: bad ? 'bad' : 'good' }, t)), r.added ? h('div', { class: 'muted' }, `${r.filled} answer${r.filled === 1 ? '' : 's'} now come from this page.`) : null);
+        addBtn.disabled = false;
+      };
+      const show = async () => {
+        if (!detail.hidden) { detail.hidden = true; return; }
+        detail.hidden = false; setKids(detail, 'Loading…');
+        try {
+          const l = await api(`/api/sources/pages?school=${encodeURIComponent(s.id)}&source=${key}`);
+          setKids(detail, l.pages.length ? h('ul', { class: 'savedlist' }, l.pages.map((p) => h('li', null,
+            h('b', null, p.title || p.name), ' ', h('span', { class: 'muted small' }, `(${p.kind === 'pdf' ? 'PDF' : 'web page'}, ${Math.max(1, Math.round(p.bytes / 1024)).toLocaleString()} KB, added ${ago(p.addedAt)})`),
+            p.url ? h('span', { class: 'sub' }, safeUrl(p.url) ? ext(p.url) : p.url) : null,
+            p.warning ? h('span', { class: 'sub warnline' }, p.warning) : null,
+            h('button', { class: 'btn link small', type: 'button', onclick: async () => {
+              try { await api('/api/sources/remove', { school: s.id, source: key, id: p.id }); d = await api('/api/sources'); drawTable(); } catch (e) { setKids(detail, h('span', { class: 'bad' }, e.message)); }
+            } }, 'Remove'))) ) : h('span', { class: 'muted small' }, 'No saved pages.'));
+        } catch (e) { setKids(detail, h('span', { class: 'bad' }, e.message)); }
+      };
+      const status = mine
+        ? [h('span', { class: 'chip ' + (mine.filled > 0 ? 'ok' : 'warn'), title: mine.filled > 0 ? 'Answers that now come from this source because the website did not give them' : 'Nothing was read from the saved page(s), or the website already answered everything the page holds.' },
+          `${mine.pages} page${mine.pages === 1 ? '' : 's'} · ${mine.filled || 0} filled`),
+        mine.facts === 0 ? h('span', { class: 'chip warn', title: 'No labelled facts were recognised on this page. Send an example to be set up.' }, 'nothing read') : null,
+        mine.warning ? h('span', { class: 'chip warn', title: 'Open the pages to see the warning' }, 'check') : null,
+        ' ', h('button', { class: 'btn link small', type: 'button', onclick: show }, 'Show / remove'), ' ', h('span', { class: 'muted small' }, ago(mine.at))]
+        : h('span', { class: 'muted small' }, 'None yet');
+      return h('tr', { 'data-school': s.id },
+        h('td', { class: 'name' }, h('a', { href: '#/school/' + encodeURIComponent(s.id) }, s.name), h('span', { class: 'sub' }, [s.region, s.tier ? 'Tier ' + s.tier : ''].filter(Boolean).join(' · ')), s.addedByHand ? h('span', { class: 'sub' }, 'added by hand') : null),
+        h('td', null, linkFor(s)),
+        h('td', null, status, detail),
+        h('td', null, addBtn, input, h('div', { class: 'srcmsg' }, msg)));
+    }
+
+    function drawTable() {
+      const q = SS.q.trim().toLowerCase();
+      const list = d.schools.filter((s) => {
+        if (q && !`${s.name} ${s.region || ''}`.toLowerCase().includes(q)) return false;
+        const has = !!(d.pages[s.id] || {})[key];
+        if (SS.show === 'saved') return has;
+        if (SS.show === 'missing') return !has;
+        if (SS.show === 'ravenna') return s.portalLabel === 'Ravenna';
+        if (SS.show === 'ravenna-missing') return s.portalLabel === 'Ravenna' && !has;
+        return true;
+      });
+      countEl.textContent = `${list.length} of ${d.schools.length} schools`;
+      for (const [k, el] of tabCounts) el.textContent = ` ${savedCount(k)}`;
+      const withPages = d.schools.filter((s) => (d.pages[s.id] || {})[key]).length;
+      const filled = d.schools.reduce((n, s) => n + (((d.pages[s.id] || {})[key] || {}).filled || 0), 0);
+      summaryEl.textContent = withPages ? `${withPages} school${withPages === 1 ? '' : 's'} have saved ${src.label} pages, which filled ${filled} answer${filled === 1 ? '' : 's'} the websites did not give.` : `No ${src.label} pages saved yet.`;
+      setKids(tbody, list.length ? list.slice(0, 400).map(rowFor) : h('tr', null, h('td', { colspan: 4, class: 'empty' }, 'No schools match.')));
+    }
+
+    const search = h('input', { type: 'search', placeholder: 'Search school or region', 'aria-label': 'Search school or region', value: SS.q, oninput: (e) => { SS.q = e.target.value; drawTable(); } });
+    const showSel = h('select', { 'aria-label': 'Which schools' }, [
+      ['all', 'All schools'], ['saved', `With ${src.label} pages`], ['missing', `Without ${src.label} pages`],
+      ...(key === 'ravenna' ? [['ravenna', 'Ravenna schools only'], ['ravenna-missing', 'Ravenna schools still to add']] : [])].map(([v, t]) => h('option', { value: v }, t)));
+    if ([...showSel.options].some((o) => o.value === SS.show)) showSel.value = SS.show; else SS.show = 'all';
+    showSel.onchange = () => { SS.show = showSel.value; drawTable(); };
+
+    const steps = key === 'ravenna'
+      ? ['Press “Open in Ravenna” on the school’s row and sign in to Ravenna in your own browser.', 'Open the page that holds the application steps, dates and requirements and wait until it has fully loaded.']
+      : [`Press “Find on ${src.label}” on the school’s row and open the school’s ${src.label} page in your own browser.`, 'Wait until the page has fully loaded.'];
+    app.replaceChildren(
+      h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Ravenna and other sources'),
+        h('p', null, 'The school’s own website is always read first. For a question the website does not answer, the dashboard fills it from pages you saved by hand, in this order: ',
+          h('b', null, '1. the school’s website, 2. Ravenna, 3. Niche, 4. Private School Review and Boarding School Review'), '. Every answer shows which site it came from, and a later source never replaces an earlier one.'),
+        h('p', { class: 'muted small' }, 'Why saved by hand? Niche blocks automatic readers, Private School Review’s terms of use do not allow them, and Ravenna needs your login. So you open the page in your own browser, save it, and add the file here. The dashboard never contacts these sites.'))),
+      tabs,
+      h('p', { class: 'small muted' }, src.blurb),
+      h('details', { class: 'panel' }, h('summary', null, `How to add ${src.label} pages`),
+        h('ol', null,
+          ...steps.map((t) => h('li', null, t)),
+          h('li', null, 'Press ', h('b', null, 'Ctrl + S'), ' and save it as ', h('b', null, '“Webpage, HTML only”'), ' (or “Webpage, Complete”). The file ending in .html is the one to add; ignore the folder next to it. If a page will not save properly, print it to a PDF instead.'),
+          h('li', null, 'Add the file on the school’s row below, or drop many files in the box. The answers appear on the school’s page, marked with where they came from.'))),
+      saveButtonPanel(),
+      drop, dropInput, results,
+      summaryEl,
+      h('div', { class: 'bar' }, search, showSel, countEl),
+      h('div', { class: 'tablewrap' }, h('table', null, h('thead', null, h('tr', null, ['School', `Page on ${src.label}`, 'Saved pages', ''].map((t) => h('th', null, t)))), tbody)));
+    drawTable();
+  }
+
+  // ------------------------------------------------------------------------- the one-click save button ---
+  // A bookmark the person drags to their browser's bookmarks bar. Clicked on a Niche, Private School Review, Boarding School Review or Ravenna
+  // page they are looking at, it opens this dashboard's #/receive page in a small window and hands the page over with postMessage (which a
+  // website's own security rules do not stop). The person opened the page themselves; nothing is fetched by the dashboard. If the dashboard does
+  // not answer, the bookmark saves the page as a file instead, which can be added the usual way.
+  const SAVE_SITES = [['niche', /(^|\.)niche\.com$/i], ['psr', /(^|\.)privateschoolreview\.com$/i], ['bsr', /(^|\.)boardingschoolreview\.com$/i], ['ravenna', /(^|\.)ravenna-hub\.com$/i]];
+  /** Which source a page's web address belongs to, or null: only these sites (over https) are ever accepted. */
+  const sourceForOrigin = (origin) => {
+    let u; try { u = new URL(origin); } catch { return null; }
+    if (u.protocol !== 'https:') return null;
+    const hit = SAVE_SITES.find(([, re]) => re.test(u.hostname));
+    return hit ? hit[0] : null;
+  };
+  function bookmarkletCode(origin) {
+    return [
+      '(function(){',
+      `var D=${JSON.stringify(origin)},H='<!DOCTYPE html>'+document.documentElement.outerHTML,U=location.href,T=document.title,done=0,ping,timer;`,
+      'function file(why){if(done)return;done=1;clearInterval(ping);clearTimeout(timer);',
+      'var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([H],{type:"text/html"}));',
+      'a.download=(T||"page").replace(/[^A-Za-z0-9 ()._-]+/g," ").slice(0,80)+".html";document.body.appendChild(a);a.click();a.remove();',
+      'alert(why+" The page was saved as a file in your Downloads folder instead. Add that file on the Ravenna & reviews page of the dashboard.");}',
+      'var w=window.open(D+"/#/receive","sisSave","width=560,height=600");',
+      'if(!w){file("Pop-ups are blocked for this site.");return;}',
+      'window.addEventListener("message",function(e){if(e.origin!==D||!e.data||!e.data.sisReady||done)return;',
+      'done=1;clearInterval(ping);clearTimeout(timer);w.postMessage({sis:1,html:H,url:U,title:T},D);});',
+      'ping=setInterval(function(){try{w.postMessage({sisPing:1},D)}catch(x){}},400);',
+      'timer=setTimeout(function(){file("The dashboard did not answer (is it open, and are you signed in?).")},15000);',
+      '})();',
+    ].join('');
+  }
+
+  function saveButtonPanel() {
+    if (STATIC) return null;
+    const code = 'javascript:' + encodeURIComponent(bookmarkletCode(location.origin));
+    const link = h('a', { class: 'btn primary bookmarklet', href: code, draggable: 'true', title: 'Drag me to your bookmarks bar',
+      onclick: (e) => { e.preventDefault(); alert('Do not click it here: drag it up to your browser’s bookmarks bar, then click it on a school’s page.'); } }, '★ Save to School Info');
+    const copyBtn = h('button', { class: 'btn small', type: 'button', onclick: () => copyText(code, copyBtn) }, 'Copy the bookmark address');
+    return h('details', { class: 'panel', open: true },
+      h('summary', null, 'One-click save button: save a page you are looking at without saving a file'),
+      h('p', null, 'Instead of pressing Ctrl + S and choosing the file, you click one bookmark. It sends the page you are looking at to this dashboard, which finds the school by its name, adds the page, and tells you how many answers it filled.'),
+      h('ol', null,
+        h('li', null, 'Show your browser’s bookmarks bar (in Chrome or Edge: ', h('kbd', null, 'Ctrl'), ' + ', h('kbd', null, 'Shift'), ' + ', h('kbd', null, 'B'), ').'),
+        h('li', null, 'Drag this button up to the bookmarks bar: ', link, ' ', h('span', { class: 'muted small' }, '(Do not click it here.) Cannot drag? Make a new bookmark by hand named “Save to School Info” and paste the address: '), copyBtn),
+        h('li', null, 'Open a school’s page on Niche, Private School Review, Boarding School Review or Ravenna (sign in first if needed) and wait until it has fully loaded.'),
+        h('li', null, 'Click the bookmark. A small window opens and saves the page. If it cannot tell which school the page is for, it asks you to choose.')),
+      h('p', { class: 'muted small' }, `This button works with the dashboard at ${location.origin}. The first time, your browser may ask to allow pop-ups from the site: allow them. The dashboard must be open and you must be signed in. If the dashboard does not answer, the page is saved as a file in your Downloads folder instead, and you can add that file below. The dashboard never opens these sites itself.`));
+  }
+
+  /** The small window the bookmark opens: waits for a page from an allowed site, adds it, and says what happened. */
+  async function viewReceive() {
+    if (STATIC) return;
+    document.body.classList.add('receivemode');
+    const box = h('div', { class: 'panel receivebox' });
+    app.replaceChildren(box);
+    const say = (title, text, kind, ...more) => setKids(box, h('h2', null, title), text ? h('p', { class: kind || '' }, text) : null, ...more);
+    say('Ready', 'Waiting for a page. Open a school’s page on Niche, Private School Review, Boarding School Review or Ravenna, and click the “Save to School Info” bookmark there.');
+    const post = async (q, html) => {
+      const r = await fetch('/api/sources/page?' + q, { method: 'POST', headers: { 'X-Dashboard': '1', 'Content-Type': 'application/octet-stream' }, body: html });
+      return { ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) };
+    };
+    const choose = async (src, name, html, url, why, candidates) => {
+      let all = [];
+      try { all = (await api('/api/sources')).schools || []; } catch { /* the list below stays empty */ }
+      const first = new Set((candidates || []).map((c) => c.id));
+      const sorted = [...all.filter((s) => first.has(s.id)), ...all.filter((s) => !first.has(s.id))];
+      const find = h('input', { type: 'search', placeholder: 'Type to find the school', 'aria-label': 'Find the school' });
+      const sel = h('select', { size: '8', 'aria-label': 'School' });
+      const draw = () => { const q = find.value.trim().toLowerCase(); setKids(sel, sorted.filter((s) => !q || s.name.toLowerCase().includes(q)).slice(0, 80).map((s) => h('option', { value: s.id }, s.name))); if (sel.options.length) sel.selectedIndex = 0; };
+      find.oninput = draw; draw();
+      const go = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+        if (!sel.value) return;
+        go.disabled = true;
+        await save(src, name, html, url, sel.value);
+      } }, 'Save the page to this school');
+      say('Which school is this?', why, 'bad', find, sel, h('div', { class: 'runbtns' }, go));
+    };
+    const save = async (src, name, html, url, schoolId) => {
+      say('Saving…', name);
+      const q = new URLSearchParams({ source: src, name });
+      if (schoolId) q.set('school', schoolId); else q.set('auto', '1');
+      if (safeUrl(url)) q.set('page', url);
+      let r;
+      try { r = await post(q, html); } catch (e) { say('Could not save the page', 'The dashboard could not be reached. Try again, or use the saved-file route on the Ravenna & reviews page.', 'bad'); return; }
+      if (r.status === 401 && r.j.signIn) { say('Please sign in', 'Your sign-in has expired. Sign in to the dashboard in this window, then click the bookmark again.', 'bad', h('a', { class: 'btn', href: r.j.signIn }, 'Sign in')); return; }
+      if (r.status === 409 && Array.isArray(r.j.candidates)) { await choose(src, name, html, url, r.j.error, r.j.candidates); return; }
+      if (!r.ok) { say('That page was not added', r.j.error || 'Request failed (' + r.status + ')', 'bad'); return; }
+      const n = r.j.filled || 0;
+      say('Saved', `Added to ${r.j.school.name}. ${n ? `${n} answer${n === 1 ? '' : 's'} now come${n === 1 ? 's' : ''} from this page.` : 'The school’s website already answered everything this page holds, or no labelled facts were found on it.'}`, 'good',
+        r.j.entry.warning ? h('p', { class: 'warnline' }, r.j.entry.warning) : null,
+        h('div', { class: 'runbtns' }, h('a', { class: 'btn', href: '#/school/' + encodeURIComponent(r.j.school.id) }, 'Open the school'), h('button', { class: 'btn', type: 'button', onclick: () => window.close() }, 'Close this window')),
+        h('p', { class: 'muted small' }, 'This window closes by itself in a few seconds.'));
+      setTimeout(() => { if (box.isConnected && /^Saved/.test((box.querySelector('h2') || {}).textContent || '')) window.close(); }, 6000);
+    };
+    const onMessage = async (e) => {
+      const src = sourceForOrigin(e.origin);
+      if (!src || !e.data || typeof e.data !== 'object') return;     // only the review sites and Ravenna, over https
+      if (e.data.sisPing) { try { e.source.postMessage({ sisReady: 1 }, e.origin); } catch { /* the page closed */ } return; }
+      if (!e.data.sis || typeof e.data.html !== 'string') return;
+      const title = String(e.data.title || 'page').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').trim().slice(0, 100) || 'page';
+      // the page's own text encoding no longer applies: what arrives is text, which is sent as UTF-8
+      const html = e.data.html.replace(/<meta[^>]+charset=[^>]*>/ig, '<meta charset="utf-8">');
+      await save(src, title + '.html', html, String(e.data.url || ''));
+    };
+    S.receiveHandler = onMessage;
+    window.addEventListener('message', onMessage);
+    if (window.opener) { try { window.opener.postMessage({ sisReady: 1 }, '*'); } catch { /* no opener to tell */ } }
+  }
+
+  /** On a school's page: what was saved from Ravenna and the review sites for it, and a way to add more. */
+  function otherSourcesPanel(s, r) {
+    if (STATIC) return null;
+    const mine = (r && r.otherSources) || {};
+    const keys = Object.keys(mine);
+    const line = (k) => h('li', null, h('b', null, mine[k].label), `: ${mine[k].pages} saved page${mine[k].pages === 1 ? '' : 's'}, ${mine[k].filled.length} answer${mine[k].filled.length === 1 ? '' : 's'} filled in`);
+    const go = (k) => h('a', { class: 'btn small', href: '#/sources/' + k, onclick: () => { S.srcQ = s.name; } }, k === 'ravenna' ? 'Ravenna' : k === 'niche' ? 'Niche' : k === 'psr' ? 'Private School Review' : 'Boarding School Review');
+    return h('details', { class: 'panel', open: keys.length > 0 },
+      h('summary', null, keys.length ? 'Answers from Ravenna, Niche or review sites: pages saved for this school' : 'Fill the gaps from Ravenna, Niche or the review sites'),
+      h('p', null, 'The school’s website is read first. For anything it does not answer, you can add pages you saved by hand, and the answers will say which site they came from.'),
+      keys.length ? h('ul', null, keys.map(line)) : null,
+      h('div', { class: 'runbtns' }, h('span', { class: 'muted small' }, 'Add a page from: '), go('ravenna'), go('niche'), go('psr'), go('bsr')));
   }
 
   // ------------------------------------------------------------ school view ---
@@ -653,12 +979,14 @@
       const copyBtn = h('button', { type: 'button', class: 'btn copybtn', title: 'Copy this value to paste into your spreadsheet', onclick: () => copyText(f.value, copyBtn) }, 'Copy');
       return [
         clamped(f.value, copyBtn),
+        // an answer the website did not give: say which other site it was read from
+        f.source ? h('div', null, h('span', { class: 'chip info', title: 'The school’s website did not answer this. It was read from a page saved by hand from ' + f.source.label + '.' }, 'From ' + f.source.label + ' (saved page)')) : null,
         h('div', { class: 'src' }, 'From: ', srcs.map((x, i) => [i ? ', ' : '', ext(x.url, null, x.title)]),
           // the old match mark only says how the rule found the text, not whether it is true: key facts show the rating instead, copied text sections keep it
           row.trust ? null : h('span', { class: 'conf ' + f.confidence, title: 'Exact match: a clearly labelled figure. Probable match: a relevant sentence or section. Please double-check: found by a keyword only.' }, CONF_LABEL[f.confidence] || (f.confidence + ' confidence'))),
         f.note ? h('div', { class: 'note' }, f.note) : null,
         row.trust ? trustLine(row.trust) : null,
-        h('details', null, h('summary', null, 'Show the words from the website' + (f.alts ? ` and ${f.alts.length} other possible answer${f.alts.length === 1 ? '' : 's'}` : '')),
+        h('details', null, h('summary', null, (f.source ? `Show the words from the ${f.source.label} page` : 'Show the words from the website') + (f.alts ? ` and ${f.alts.length} other possible answer${f.alts.length === 1 ? '' : 's'}` : '')),
           h('div', { class: 'evidence' }, f.snippet || ''),
           f.alts ? h('ul', { class: 'alts' }, f.alts.map((a) => h('li', null, a.value.length > 220 ? a.value.slice(0, 220) + '…' : a.value, ' — ', ext(a.url)))) : null),
       ];
@@ -777,7 +1105,15 @@
         r.lastAttempt ? `The website refused an automatic check again ${ago(r.lastAttempt.at)}, so these answers were kept. ` : '',
         'Save the pages again and press “Read these pages” to update them.')
       : null;
-    const savedPanel = !STATIC && s.website && (!r || r.status !== 'ok' || r.source === 'saved-pages') ? savedPagesPanel(s, r, () => viewSchool(id, tabIndex)) : null;
+    // the website could not be read, but pages saved from Ravenna, Niche or a review site still answered some questions
+    const websiteDown = !!(r && r.websiteStatus && r.websiteStatus.status !== 'ok');
+    const otherNotice = r && r.source === 'other-sources'
+      ? h('div', { class: 'notice info' }, h('b', null, 'The school’s website could not be read, so these answers come only from pages saved by hand. '),
+        `They were read from ${Object.values(r.otherSources || {}).map((o) => o.label).join(', ') || 'other sites'}. `,
+        'Each answer says which site it came from. Anything not shown has no answer yet.')
+      : null;
+    const savedPanel = !STATIC && s.website && (!r || r.status !== 'ok' || r.source === 'saved-pages' || websiteDown) ? savedPagesPanel(s, r, () => viewSchool(id, tabIndex)) : null;
+    const otherPanel = otherSourcesPanel(s, r);
 
     // a plain-words guide to reading the page, with this school's own numbers
     const fieldRows = d.rows.filter((x) => x.kind === 'field');
@@ -815,7 +1151,7 @@
             s.region ? h('span', null, s.region) : null,
             s.website ? h('span', null, 'Website: ', ext(s.website)) : h('span', null, 'No website link in the list'),
             s.portal ? h('span', null, 'Application portal: ', ext(s.portal, s.portalLabel && !/^https?:/i.test(s.portalLabel) ? s.portalLabel : null)) : null,
-            r ? h('span', null, `Last checked ${ago(r.scrapedAt)}; read ${r.pages.length} pages of the website`) : null),
+            r ? h('span', null, `Last checked ${ago(r.scrapedAt)}; read ${r.pages.filter((p) => !p.fromSource).length} pages of the website`) : null),
           h('div', { class: 'meta' },
             tab ? h('span', null, `Tab in your sheet: “${tab.tab.trim()}”` + (tab.matchedBy !== 'exact' ? ` (found by ${tab.matchedBy}; please make sure it is the right tab)` : '')) : h('span', null, 'This school has no tab in your sheet yet'),
             d.tabs.length > 1 ? (() => {
@@ -826,13 +1162,13 @@
         h('div', { class: 'actions' }, xlsxSchoolBtn, fileBtn, d.exportConfigured ? exportBtn : null, d.exportFailing ? h('span', { class: 'muted small' }, 'One-click send is off because its last test failed (see Start here). The file download works.') : null,
           STATIC ? null : h('button', { class: 'btn primary', type: 'button', disabled: running || !s.website, title: running ? 'A check is already running' : null,
             onclick: () => startRun({ scope: 'schools', ids: [s.id] }) }, r ? 'Check this website again' : 'Check this school’s website'))),
-      wrongSite, urlChangedNotice, notice, savedNotice, savedPanel, siteChanges, exportBox, canExport && !STATIC ? colourDetails() : null, guideBox, filterBox, rowsBox,
-      r && r.pages.length ? h('details', { class: 'panel' }, h('summary', null, `Pages read on this website (${r.pages.length})`),
+      wrongSite, urlChangedNotice, notice, savedNotice, otherNotice, savedPanel, otherPanel, siteChanges, exportBox, canExport && !STATIC ? colourDetails() : null, guideBox, filterBox, rowsBox,
+      r && r.pages.length ? h('details', { class: 'panel' }, h('summary', null, `Pages read (${r.pages.length})`),
         h('div', { class: 'tablewrap' }, h('table', null,
           h('thead', null, h('tr', null, h('th', null, 'Page'), h('th', null, 'Looks like a page about'), h('th', { class: 'num' }, 'Amount of text'))),
           h('tbody', null, r.pages.map((p) => h('tr', null,
-            h('td', null, p.title || '(untitled)', h('span', { class: 'sub' }, ext(p.url))),
-            h('td', { class: 'small' }, (p.topics || []).join(', ') + (p.kind === 'pdf' ? ' (PDF)' : '')),
+            h('td', null, p.title || '(untitled)', p.fromSource ? h('span', { class: 'chip info' }, 'saved from ' + (OTHER_LABEL[p.fromSource] || p.fromSource)) : null, h('span', { class: 'sub' }, ext(p.url))),
+            h('td', { class: 'small' }, p.fromSource ? 'a page you saved by hand' : (p.topics || []).join(', ') + (p.kind === 'pdf' ? ' (PDF)' : '')),
             h('td', { class: 'num small' }, (p.chars || 0).toLocaleString() + ' characters'))))))) : null,
       r && r.skipped && r.skipped.length ? h('details', { class: 'panel' }, h('summary', null, `Pages it tried but could not read (${r.skipped.length})`),
         h('ul', null, r.skipped.map((x) => h('li', { class: 'small' }, ext(x.url), ' — ', x.reason)))) : null);
@@ -2524,9 +2860,11 @@
   async function route() {
     const hash = location.hash.replace(/^#\/?/, '');
     let view = hash.split('/')[0];
-    if (STATIC && (view === 'run' || view === 'start' || view === 'ask' || view === 'sheet-setup')) { view = 'schools'; history.replaceState(null, '', '#/'); }
+    if (STATIC && (view === 'run' || view === 'start' || view === 'ask' || view === 'sheet-setup' || view === 'sources' || view === 'receive')) { view = 'schools'; history.replaceState(null, '', '#/'); }
     if (STATIC && (view === 'accuracy' || view === 'review')) { view = 'schools'; history.replaceState(null, '', '#/'); }
     runUi = null; askUi = null;
+    if (S.receiveHandler) { window.removeEventListener('message', S.receiveHandler); S.receiveHandler = null; }   // the save window listens only while it is shown
+    document.body.classList.toggle('receivemode', view === 'receive' && !STATIC);
     try {
       if (!S.ov) { app.replaceChildren(h('p', { class: 'loading' }, 'Loading…')); await loadOverview(); }
       // with no page chosen, open Start here until a sheet has been loaded, then the school list
@@ -2534,12 +2872,14 @@
       S.view = view;
       for (const t of [...TASKS.values()]) if (t.hideOnView === view && t.state !== 'running') TASKS.delete(t.id);   // already seen on its own page
       drawTasks();   // a card meant for another page (such as Ask's) hides itself on that page
-      const TITLES = { start: 'Start here', run: 'Check websites', ask: 'Ask', accuracy: 'Accuracy', review: 'To check', help: 'Help', script: 'Technical details', 'sheet-setup': 'Google Sheet setup' };
+      const TITLES = { start: 'Start here', run: 'Check websites', sources: 'Ravenna and other sources', ask: 'Ask', accuracy: 'Accuracy', review: 'To check', help: 'Help', script: 'Technical details', 'sheet-setup': 'Google Sheet setup' };
       document.title = (view === 'school' ? 'School' : TITLES[view] || 'Schools') + ' · School Info Sheet';   // tells browser tabs apart
       document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.view === (view === 'school' ? 'schools' : view)));
       if (view === 'start') return await viewStart();
       if (view === 'school') return await viewSchool(decodeURIComponent(hash.slice('school/'.length)));
       if (view === 'run') return viewRun();
+      if (view === 'sources') return await viewSources(hash.split('/')[1]);
+      if (view === 'receive') return await viewReceive();
       if (view === 'ask') return await viewAsk();
       if (view === 'accuracy') return await viewAccuracy();
       if (view === 'review') return await viewReview();
