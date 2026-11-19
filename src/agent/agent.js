@@ -9,7 +9,54 @@ class AskError extends Error {          // the message is safe to show the perso
   constructor(message, status) { super(message); this.name = 'AskError'; this.status = status || 400; }
 }
 const MAX_STEPS = 8;                    // rounds of "ask the AI, run its tools" for one question
+const MAX_LOOKUPS = 12;                 // saved-data lookups for one question; after that the AI must answer with what it has (every round re-sends the whole chat, so a long chain gets dear)
 const SOURCE_LIMIT = 12;                // web sources listed under one answer
+const STALE_RESULT = '[Earlier lookup result removed to save cost. Look it up again if you need it.]';
+
+// Saying so in the question ("search the web for ...") is the only way to get a web search before the saved data has been tried.
+const ASKS_FOR_WEB_RE = /\b(?:web\s*search|search\s+(?:the\s+)?(?:web|internet|online)\b|google\s+(?:it|this|that)\b|(?:look|find|check|search)\b[^.?!]{0,30}\b(?:on|from)\s+(?:the\s+)?(?:web|internet)\b|(?:look|find|check)\b[^.?!]{0,30}\bonline\b)/i;
+const asksForWeb = (text) => ASKS_FOR_WEB_RE.test(String(text || ''));
+
+/**
+ * True when a lookup in the SAVED data found nothing that could answer the question: the school is not in the list, has not
+ * been checked, or its saved page has no value for what was asked. Only then is a web search worth its cost.
+ * (A lookup that fails with an error, or a list that is simply empty, is not "nothing saved": the AI just asks again.)
+ */
+function savedDataCameUpEmpty(name, data, input) {
+  if (!data || typeof data !== 'object') return false;
+  if (name === 'search_schools') return !!(input && typeof input.query === 'string' && input.query.trim()) && data.total_matches === 0;
+  if (name === 'search_scraped_pages') return data.total_hits === 0;
+  if (name === 'get_school_facts') {
+    if (data.scrape_status && data.scrape_status !== 'scraped') return true;
+    return Array.isArray(data.fields) && !data.fields.some((f) => f && ((f.website && typeof f.website === 'object') || f.sheet));
+  }
+  return false;
+}
+
+/**
+ * Every call re-sends the whole conversation, and the raw lookup results are by far its biggest part. Once a question is two
+ * or more questions old its lookup results are replaced by a one-line stub (the AI's own answer stays, so follow-ups still
+ * make sense). The tool_use / tool_result pairs are kept, which the AI service requires. Returns true when anything changed.
+ */
+function trimOldToolResults(history, upToIndex = Array.isArray(history) ? history.length : 0) {
+  if (!Array.isArray(history)) return false;
+  const end = Math.min(history.length, Math.max(0, upToIndex));
+  let lastQuestion = -1;                                       // where the most recent finished question starts: it stays whole
+  for (let i = 0; i < end; i++) if (history[i] && history[i].role === 'user' && typeof history[i].content === 'string') lastQuestion = i;
+  let changed = false;
+  for (let i = 0; i < lastQuestion; i++) {
+    const m = history[i];
+    if (!m || m.role !== 'user' || !Array.isArray(m.content)) continue;
+    let touched = false;
+    const content = m.content.map((b) => {
+      if (!b || b.type !== 'tool_result' || typeof b.content !== 'string' || b.content.length <= STALE_RESULT.length + 40 || b.content === STALE_RESULT) return b;
+      touched = true;
+      return { ...b, content: STALE_RESULT };
+    });
+    if (touched) { history[i] = { ...m, content }; changed = true; }
+  }
+  return changed;
+}
 
 /** The web searches whose results arrived in this response, each reported once: { id, query, ok, count, error, results }. */
 function finishedSearches(content, history, seen) {
@@ -122,9 +169,13 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
   const startLen = history.length;
   // Prior completed turns must not resend signed thinking blocks from earlier conversations/system prefixes.
   stripThinkingFromHistory(history, startLen);
-  const turn = { answer: '', steps: [], proposals: [], sources: [], searches: 0, cost: 0, calls: 0, inputTokens: 0, outputTokens: 0 };
+  trimOldToolResults(history, startLen);
+  const turn = { answer: '', steps: [], proposals: [], sources: [], searches: 0, cost: 0, calls: 0, inputTokens: 0, outputTokens: 0, lookups: 0, stoppedEarly: false };
   const seenSearches = new Set();
   const paid = provider.name === 'anthropic';   // the test provider's spending is not tracked here
+  // The web search tool is not even offered to the AI until the saved data has been tried and found nothing (or the person asked for the web).
+  let webOpen = !!provider.webSearch && asksForWeb(text);
+  let mustAnswer = false;                       // after MAX_LOOKUPS: no more tools, answer now
   history.push({ role: 'user', content: text });
   try {
     for (let step = 0; step < maxSteps; step++) {
@@ -139,12 +190,14 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
         emit({ type: 'text-delta', text: delta });
       };
       let res;
+      const forced = mustAnswer;
+      const args = () => ({ model: config.model, system, tools: tools.definitions, messages: history, effort: config.effort, signal, onText, web: webOpen, noMoreTools: forced });
       try {
-        res = await provider.create({ model: config.model, system, tools: tools.definitions, messages: history, effort: config.effort, signal, onText });
+        res = await provider.create(args());
       } catch (err) {
         if (isThinkingSignatureError(err) && stripThinkingFromHistory(history, history.length)) {
           if (streamedAny) { streamedAny = false; emit({ type: 'text-reset' }); }
-          res = await provider.create({ model: config.model, system, tools: tools.definitions, messages: history, effort: config.effort, signal, onText });
+          res = await provider.create(args());
         } else {
           throw err;
         }
@@ -192,6 +245,7 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
           try {
             const r = tools.run(call.name, call.input, { compact: !!provider.compact, owner: user || 'local' });
             body = JSON.stringify(r.data); label = r.label; proposal = r.proposal;
+            if (!webOpen && provider.webSearch && savedDataCameUpEmpty(call.name, r.data, call.input)) webOpen = true;
             if (body.length > provider.maxToolChars) {
               body = JSON.stringify({ error: `That result was too large (${body.length} characters). Ask for fewer schools or fields, or add a filter.` });
               isError = true; label = 'The result was too large'; proposal = undefined;
@@ -206,12 +260,16 @@ async function runTurn({ provider, config, system, tools, conversation, text, em
           results.push({ type: 'tool_result', tool_use_id: call.id, content: body, ...(isError ? { is_error: true } : {}) });
         }
         history.push({ role: 'user', content: results });
+        turn.lookups += calls.length;
+        if (turn.lookups >= MAX_LOOKUPS) mustAnswer = true;
         continue;
       }
 
       const answer = answerText(content);
+      if (forced) turn.stoppedEarly = true;
       turn.answer = (answer || 'I could not put an answer together. Try asking again, or ask in a different way.')
-        + (res.stop_reason === 'max_tokens' ? '\n\n(The answer was cut off because it got too long. Ask for fewer schools or one field at a time.)' : '');
+        + (res.stop_reason === 'max_tokens' ? '\n\n(The answer was cut off because it got too long. Ask for fewer schools or one field at a time.)' : '')
+        + (forced ? `\n\n(I stopped looking after ${MAX_LOOKUPS} lookups to keep this question cheap, so this may be incomplete. Ask about fewer schools or one field at a time to get the rest.)` : '');
       if (turn.sources.length) emit({ type: 'sources', sources: turn.sources });
       emit({ type: 'answer', text: turn.answer });
       // Once the turn finishes, drop thinking/redacted_thinking signatures so follow-up turns or saved threads stay portable.
@@ -231,6 +289,10 @@ module.exports = {
   AskError,
   explainError,
   MAX_STEPS,
+  MAX_LOOKUPS,
+  asksForWeb,
+  savedDataCameUpEmpty,
+  trimOldToolResults,
   stripThinkingFromMessage,
   stripThinkingFromHistory,
   isThinkingSignatureError,

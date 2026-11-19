@@ -104,7 +104,9 @@ const zipOf = async (entries, manifest = { kind: 'school-info-results', format: 
   const mkData = (dir) => { fs.mkdirSync(path.join(dir, 'results'), { recursive: true }); for (const f of ['schools.json', 'template.json']) fs.copyFileSync(path.join(ROOT, 'data', f), path.join(dir, f)); };
   const dataA = path.join(tmp, 'dash-a'), dataB = path.join(tmp, 'dash-b');
   mkData(dataA); mkData(dataB);
-  const real = fs.readdirSync(path.join(ROOT, 'data', 'results')).slice(0, 4);
+  // the first four saved results that were read fine (a school whose latest check was blocked would not count as "ok" below)
+  const isOk = (f) => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'results', f), 'utf8')).status === 'ok'; } catch { return false; } };
+  const real = fs.readdirSync(path.join(ROOT, 'data', 'results')).filter(isOk).slice(0, 4);
   for (const f of real) fs.copyFileSync(path.join(ROOT, 'data', 'results', f), path.join(dataA, 'results', f));
   const startServer = (port, dir) => new Promise((resolve, reject) => {
     const c = spawn(process.execPath, [path.join(ROOT, 'src', 'server.js'), '--no-browser'], { cwd: ROOT, env: { ...process.env, PORT: String(port), DATA_DIR: dir } });

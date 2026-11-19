@@ -14,7 +14,7 @@ const ROOT = path.join(__dirname, '..');
 const { createTools, ToolError } = require('../src/agent/tools');
 const { createSettings, SettingsError } = require('../src/agent/settings');
 const { costOf, createLedger } = require('../src/agent/usage');
-const { runTurn, AskError, explainError } = require('../src/agent/agent');
+const { runTurn, AskError, explainError, MAX_LOOKUPS, asksForWeb, trimOldToolResults } = require('../src/agent/agent');
 const { anthropicProvider, groqProvider, toOpenAiMessages, fromOpenAi, webSearchTool } = require('../src/agent/providers');
 const { createAssistant } = require('../src/agent');
 const { SYSTEM, WEB_RULES, isOffTopicQuestion } = require('../src/agent/prompt');
@@ -582,6 +582,62 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     ok('assistant: school-only scope prompt, web search guard, and off-topic filter work');
   }
 
+  // ============================================================ token thrift ===
+  {
+    // old raw lookup results are shrunk (they are re-sent with every call); the newest question stays whole; pairs are kept
+    const big = JSON.stringify({ rows: 'x'.repeat(3000) });
+    const h = [
+      { role: 'user', content: 'q1' },
+      { role: 'assistant', content: [use('a1', 'search_schools', {})] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a1', content: big }] },
+      { role: 'assistant', content: [text('answer 1')] },
+      { role: 'user', content: 'q2' },
+      { role: 'assistant', content: [use('a2', 'search_schools', {})] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a2', content: big }] },
+      { role: 'assistant', content: [text('answer 2')] },
+    ];
+    assert.strictEqual(trimOldToolResults(h), true);
+    assert.ok(/removed to save cost/.test(h[2].content[0].content) && h[2].content[0].tool_use_id === 'a1', 'the pair stays, the bulk goes');
+    assert.strictEqual(h[6].content[0].content, big, 'the latest question keeps its results');
+    assert.strictEqual(h[3].content[0].text, 'answer 1', 'the AI\'s own answers are never touched');
+    assert.strictEqual(h.length, 8);
+    assert.strictEqual(trimOldToolResults(h), false, 'a second pass changes nothing');
+    assert.strictEqual(trimOldToolResults([{ role: 'user', content: 'only one question' }]), false);
+
+    // through the loop: by the third question the first question's results are a stub, the second's are still whole
+    const ctx = baseRun();
+    const sc = scripted(
+      reply([use('s1', 'search_schools', { query: 'alpha' })], 'tool_use'), reply([text('one')]),
+      reply([use('s2', 'search_schools', { query: 'alpha' })], 'tool_use'), reply([text('two')]),
+      reply([text('three')]),
+    );
+    const p3 = anthropicProvider(sc.client);
+    await go(ctx, p3, 'First?'); await go(ctx, p3, 'Second?'); await go(ctx, p3, 'Third?');
+    const last = sc.calls[4].messages;
+    assert.ok(/removed to save cost/.test(last[2].content[0].content), 'two questions old: stub');
+    assert.ok(last[6].content[0].content.startsWith('{'), 'one question old: whole');
+    assert.ok(!/removed to save cost/.test(sc.calls[2].messages[2].content[0].content), 'a question is never trimmed while it is the latest');
+    ok('thrift: lookup results two questions old shrink to a stub; the latest stay whole');
+
+    // a runaway chain of lookups is cut off: after the limit the AI must answer with what it has
+    const many = Array.from({ length: MAX_LOOKUPS }, (_, i) => use('m' + i, 'search_schools', { query: 'alpha' }));
+    const cap = scripted(reply(many, 'tool_use'), reply([text('Here is what I found.')]));
+    const ct = await go(baseRun(), anthropicProvider(cap.client), 'List everything');
+    assert.strictEqual(cap.calls[0].tool_choice, undefined);
+    assert.deepStrictEqual(cap.calls[1].tool_choice, { type: 'none' });
+    assert.ok(cap.calls[1].tools.length === 10, 'tools stay listed so the cached prefix is kept');
+    assert.ok(ct.answer.startsWith('Here is what I found.') && new RegExp(`stopped looking after ${MAX_LOOKUPS} lookups`).test(ct.answer));
+    assert.strictEqual(ct.stoppedEarly, true);
+    const few = scripted(reply([use('f1', 'search_schools', { query: 'alpha' })], 'tool_use'), reply([text('ok')]));
+    const ft = await go(baseRun(), anthropicProvider(few.client), 'One school');
+    assert.strictEqual(few.calls[1].tool_choice, undefined); assert.ok(!/stopped looking/.test(ft.answer));
+    let seen = null;
+    const gp = groqProvider({ apiKey: GROQ, fetchImpl: async (u, o) => { seen = JSON.parse(o.body); return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }], usage: {} }) }; } });
+    await gp.create({ model: 'm', system: 'sys', tools: [{ name: 'a', description: 'd', input_schema: { type: 'object' } }], messages: [{ role: 'user', content: 'q' }], noMoreTools: true });
+    assert.strictEqual(seen.tool_choice, 'none');
+    ok(`thrift: after ${MAX_LOOKUPS} lookups no more tools are allowed and the answer says so`);
+  }
+
   // ================================================================ web search ===
   {
     // offered only when switched on, in the version that suits the model
@@ -589,12 +645,35 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     await go(baseRun(), anthropicProvider(off.client));
     assert.ok(!off.calls[0].tools.some((t) => t.name === 'web_search'), 'web search is off unless switched on');
     const on = scripted(reply([text('x')]));
-    await go(baseRun(), anthropicProvider(on.client, { webSearch: true }));
+    await go(baseRun(), anthropicProvider(on.client, { webSearch: true }), 'Search the web for Alpha Academy tuition');
     assert.strictEqual(on.calls[0].tools.length, 11);
     assert.deepStrictEqual(on.calls[0].tools[10], { type: 'web_search_20260209', name: 'web_search', max_uses: 3 });
     assert.strictEqual(webSearchTool('claude-haiku-5-5').type, 'web_search_20250305', 'Haiku has only the plain version');
     assert.strictEqual(webSearchTool('claude-sonnet-5-5').type, 'web_search_20260209');
     ok('web search is off by default and offered in the right version for the model');
+
+    // thrift: even when switched on, the web tool is not offered until the SAVED data has been tried and found nothing
+    const plain = scripted(reply([text('x')]));
+    await go(baseRun(), anthropicProvider(plain.client, { webSearch: true }), 'How is Alpha doing?');
+    assert.ok(!plain.calls[0].tools.some((t) => t.name === 'web_search'), 'the first look is always at the saved data');
+    for (const q of ['search the web for Alpha tuition', 'Please do a web search on Beta School', 'Can you look that up online?', 'find the deadline on the internet', 'Google it']) assert.ok(asksForWeb(q), q);
+    for (const q of ['Which online schools are in Tier 1?', 'How is Alpha doing?', 'What is the web address of Beta School?', 'Is the application deadline on the website?']) assert.ok(!asksForWeb(q), q);
+    const lookup = (name, input, ...later) => scripted(reply([use('t1', name, input)], 'tool_use'), ...(later.length ? later : [reply([text('done')])]));
+    const webAfter = async (name, input) => { const sc = lookup(name, input); await go(baseRun(), anthropicProvider(sc.client, { webSearch: true }), 'What is the tuition?'); return sc.calls.map((c) => c.tools.some((t) => t.name === 'web_search')); };
+    assert.deepStrictEqual(await webAfter('search_schools', { query: 'No Such School' }), [false, true], 'a school that is not in the list: the web is now allowed');
+    assert.deepStrictEqual(await webAfter('get_school_facts', { school_id: 'beta-school' }), [false, true], 'a school that has not been checked: the web is now allowed');
+    assert.deepStrictEqual(await webAfter('search_scraped_pages', { school_id: 'alpha-academy', query: 'zzzqqq' }), [false, true], 'saved pages with no mention: the web is now allowed');
+    assert.deepStrictEqual(await webAfter('search_schools', { query: 'alpha' }), [false, false], 'the school is in the saved data: no web');
+    assert.deepStrictEqual(await webAfter('get_school_facts', { school_id: 'alpha-academy', fields: ['tuition'] }), [false, false], 'the saved data has the answer: no web');
+    assert.deepStrictEqual(await webAfter('search_schools', { status: 'not_scraped', tier: 3 }), [false, false], 'an empty list is an answer, not missing data');
+    assert.deepStrictEqual(await webAfter('get_school_facts', { school_id: 'nope' }), [false, false], 'a failed lookup is not "nothing saved"');
+    const explicit = lookup('search_schools', { query: 'alpha' });
+    await go(baseRun(), anthropicProvider(explicit.client, { webSearch: true }), 'Search the web for Alpha Academy tuition');
+    assert.deepStrictEqual(explicit.calls.map((c) => c.tools.some((t) => t.name === 'web_search')), [true, true], 'asking for the web is honoured from the first step');
+    const noWebEver = lookup('search_schools', { query: 'No Such School' });
+    await go(baseRun(), anthropicProvider(noWebEver.client, { webSearch: false }), 'What is the tuition?');
+    assert.ok(noWebEver.calls.every((c) => !c.tools.some((t) => t.name === 'web_search')), 'switched off stays off');
+    ok('thrift: web search is offered only after the saved data came up empty (or when asked for in words)');
 
     // a search that pauses the turn, then a cited answer in many small text blocks
     const search = { type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: { query: 'Alpha Academy tuition 2026' } };
@@ -658,8 +737,11 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     t = assistant.begin({ user: local, conversationId: t.conversationId, message: 'again' });
     await t.run(() => {}, undefined);
     assert.ok(svc.calls[1].system[0].text.includes('WEB SEARCH') && svc.calls[1].system[0].text.includes('NOT the school\'s own website'));
-    assert.ok(svc.calls[1].tools.some((x) => x.name === 'web_search'));
+    assert.ok(!svc.calls[1].tools.some((x) => x.name === 'web_search'), 'switched on, but not offered until the saved data came up empty');
     assert.strictEqual(svc.calls[1].messages.length, 1, 'changing the web search setting starts a clean conversation');
+    t = assistant.begin({ user: local, conversationId: t.conversationId, message: 'Search the web for Alpha Academy tuition' });
+    await t.run(() => {}, undefined);
+    assert.ok(svc.calls[2].tools.some((x) => x.name === 'web_search'), 'asked for in words: offered');
     settings.save({ provider: 'groq', groqKey: GROQ });
     assert.strictEqual(assistant.status(local).webSearchOn, false, 'web search is a Claude feature');
     ok('web search rules and tool reach the AI only when switched on; Groq never gets them');

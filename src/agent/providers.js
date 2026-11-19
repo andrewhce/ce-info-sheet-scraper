@@ -42,10 +42,14 @@ function flattenSystemText(system) {
 function anthropicProvider(client, { fallbacks = true, webSearch = false } = {}) {
   return {
     name: 'anthropic', compact: false, maxToolChars: 40000, maxContextTokens: 150000, webSearch,
-    async create({ model, system, tools, messages, effort, signal, onText }) {
+    // web: false keeps the web search tool out of this call even when it is switched on (agent.js offers it only once the saved data
+    // has been tried). noMoreTools: the AI must answer now with what it has. The tools stay listed, so the cached prefix is not lost.
+    async create({ model, system, tools, messages, effort, signal, onText, web, noMoreTools }) {
+      const withWeb = webSearch && web !== false;
       const body = {
-        model, max_tokens: 4096, system: normalizeSystemBlocks(system), tools: webSearch ? [...tools, webSearchTool(model)] : tools, messages,
+        model, max_tokens: 4096, system: normalizeSystemBlocks(system), tools: withWeb ? [...tools, webSearchTool(model)] : tools, messages,
         output_config: { effort }, cache_control: { type: 'ephemeral' },
+        ...(noMoreTools ? { tool_choice: { type: 'none' } } : {}),
       };
       const streamFn = fallbacks
         ? (client.beta && client.beta.messages && typeof client.beta.messages.stream === 'function' ? (b) => client.beta.messages.stream(b, { signal }) : null)
@@ -164,14 +168,14 @@ function groqProvider({ apiKey, fetchImpl = fetch, baseUrl = GROQ_BASE, sleep = 
   }
   return {
     name: 'groq', compact: true, maxToolChars: 12000, maxContextTokens: 60000,
-    async create({ model, system, tools = [], messages, signal }) {
+    async create({ model, system, tools = [], messages, signal, noMoreTools }) {
       const payload = {
         model, messages: toOpenAiMessages(system, messages),
         temperature: 0.2, max_completion_tokens: 2048,
       };
       if (tools.length) {
         payload.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
-        payload.tool_choice = 'auto';
+        payload.tool_choice = noMoreTools ? 'none' : 'auto';
       }
       const json = await call('POST', '/chat/completions', payload, signal);
       return fromOpenAi(json);

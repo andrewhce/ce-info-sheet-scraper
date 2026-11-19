@@ -51,7 +51,8 @@ models your key can use.
 
 In **AI settings**, tick **Let the assistant search the web** and Save. A "Web search on" tag then shows above the chat.
 
-- **What it is for:** school and admissions questions when the saved data cannot answer (for example a school that has not been scraped yet, or admissions details not on its website). General non-school web searches remain blocked. If the saved data already has the fact, the assistant is told to use that first.
+- **What it is for:** school and admissions questions when the saved data cannot answer (for example a school that has not been scraped yet, or admissions details not on its website). General non-school web searches remain blocked.
+- **Saved data first, enforced by the program (not just asked of the AI).** Even with web search switched on, the search tool is not handed to the AI at all until a lookup in the saved data came up empty: the school is not in the list, has not been checked, its saved page has no value for what was asked, or none of its saved pages mention the keyword. If the saved data has the answer, no search can happen. Writing "search the web for ..." (or "look that up online") in your question opens it from the start. If the AI does not have the tool and the saved data cannot answer, it says what is missing and tells you to ask it to search the web.
 - **It is not the scraper.** Web results are other people's pages. They are labelled "From the web, not the school's own site", each source is
   listed under the answer with a warning, and nothing from the web is ever put into a comparison with your sheet or into the Google Sheet file.
   The scraper's own rule (only a school's own website) is unchanged.
@@ -70,6 +71,18 @@ Each question costs a few cents with Claude (a lookup and an answer is a few tho
 million tokens, Sonnet 5.5 $2 / $10, Haiku 5.5 $0.10 / $0.50). The bar under the page title shows an **estimate** from list prices and the
 **monthly cap** (default $100, change it in the settings). Once the cap is reached no new question is sent until next month or
 until you raise it. Groq's spend is not tracked here: check it in the Groq console.
+
+**Is a question charged when the answer is already in the saved data? Yes.** Looking in the saved data is free, but the AI still has
+to read the result and write the answer, and that is what is billed (in the first test questions, 3 to 7 cents each; the
+one question that also searched the web and made 18 lookups cost 10 cents). The program therefore keeps the bill small:
+
+- **Saved data first.** The web search tool is not offered until the saved data came up empty (see "Web search").
+- **Old lookup results are shrunk.** Every call re-sends the whole chat, and the raw lookup results are most of it. Results from
+  questions two or more questions back are replaced by a one-line stub (the assistant's own answers stay, so follow-ups still work).
+- **At most 12 lookups per question.** After that the assistant must answer with what it has and says so; ask about fewer
+  schools or one field at a time for the rest.
+- **Ask for what you need.** "Tuition for Alpha Academy" is cheaper than "Tell me about Alpha Academy", and the Schools, To check and
+  Start here pages show counts and lists for nothing, with no AI at all.
 
 ## What it records
 

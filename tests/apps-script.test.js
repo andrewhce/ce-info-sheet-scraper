@@ -391,7 +391,9 @@ const check = (name, fn) => { fn(); passed++; console.log('  ok   ' + name); };
     assert.deepStrictEqual(Object.keys(castFile.hints).sort(), ['essays', 'factsSheet', 'infoSessions']);   // the template's hint texts, once for the whole file
     assert.ok(!('hints' in castFile.schools[0]) && !('action' in castFile.schools[0]));
     assert.ok(castFile.schools[0].fields.length > 20 && castFile.schools[0].school.name === 'Castilleja (Upper) School');
-    assert.throws(() => sheetExport.buildExportFile(['beau-soleil']), /not been scraped/);
+    // any school that has no saved result yet (this used to name one school, which broke once that school was checked for real)
+    const neverChecked = require('../src/lib/dashboard-data').getSchools().schools.find((s) => !fs.existsSync(path.join(PATHS.resultsDir, s.id + '.json')));
+    if (neverChecked) assert.throws(() => sheetExport.buildExportFile([neverChecked.id]), /not been scraped/);
     const all = sheetExport.buildExportFile('all');
     const total = require('../src/lib/dashboard-data').getSchools().schools.length;
     assert.strictEqual(all.file.count + all.skipped.notScraped + all.skipped.nothingFound + all.skipped.wrongSite, total);
@@ -422,7 +424,8 @@ const check = (name, fn) => { fn(); passed++; console.log('  ok   ' + name); };
     assert.ok(sheetExport.history()['castilleja-upper-school'].at);
     fs.writeFileSync(cfgFile, JSON.stringify({ url: `http://127.0.0.1:${port}/html`, token: TOKEN }));
     await assert.rejects(() => sheetExport.testConnection(), /web page instead of an answer/);
-    await assert.rejects(() => sheetExport.exportSchool('beau-soleil', 0), /not been scraped/);
+    const unchecked = require('../src/lib/dashboard-data').getSchools().schools.find((s) => !fs.existsSync(path.join(PATHS.resultsDir, s.id + '.json')));
+    if (unchecked) await assert.rejects(() => sheetExport.exportSchool(unchecked.id, 0), /not been scraped/);
     passed++; console.log('  ok   dashboard side: sends the secret, reads the answer, explains non-JSON replies');
 
     // the saved address's health follows what its last call did (a sign-in page means it cannot work from this computer)
