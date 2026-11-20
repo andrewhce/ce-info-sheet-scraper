@@ -7,6 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { PATHS, readJson, writeJson, slug, alnum, squash, clip } = require('./util');
+const { nameWords } = require('./identity');
 const { cleanStart } = require('./crawl');
 
 class SchoolListError extends Error { constructor(m, status) { super(m); this.status = status || 422; } }
@@ -35,8 +36,8 @@ const webAddress = (raw, what) => {
  * input: { name, website?, tier?, region?, portal? }. Returns the school as it is saved in schools.json.
  * Needs the school list to exist already (the sheet has been loaded once): the template and the other schools come from it.
  */
-function addSchool(input) {
-  const list = readJson(PATHS.schools, null);
+function prepareSchool(input, schoolsOverride) {
+  const list = schoolsOverride ? { schools: schoolsOverride } : readJson(PATHS.schools, null);
   if (!list || !Array.isArray(list.schools)) throw new SchoolListError('Load your School Information Sheet once first. After that, new schools can be added here one at a time.', 400);
   const name = squash(String(input.name || '')).replace(/\n/g, ' ');
   if (name.length < 3) throw new SchoolListError('Type the school’s name (at least 3 letters).');
@@ -64,6 +65,25 @@ function addSchool(input) {
     appOpen: null, division: divisionOf(name), tabs: [],
     addedByHand: true, addedAt: new Date().toISOString(),
   };
+  return { list, school, similar: similarSchools(school, list.schools) };
+}
+
+/** Schools already in the list that the new one may be: every distinctive word of its name is in theirs, or they share a website. Not an error: a school has divisions. */
+function similarSchools(school, schools) {
+  const words = nameWords(school.name).main;
+  // the same web address (not the same base domain: many schools sit on one shared host such as schooladminonline.com)
+  const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; } };
+  const host = school.website ? hostOf(school.website) : '';
+  return schools.filter((s) => {
+    const theirs = alnum(s.name);
+    if (words.length && words.every((w) => theirs.includes(w))) return true;
+    return !!host && !!s.website && hostOf(s.website) === host;
+  }).slice(0, 5).map((s) => ({ id: s.id, name: s.name, website: s.website || null }));
+}
+
+/** Adds the school to the list. The checks are in prepareSchool, so a button that proposes it and the Add a school panel agree. */
+function addSchool(input) {
+  const { list, school } = prepareSchool(input);
   list.schools.push(school);
   writeJson(PATHS.schools, list);
   writeJson(addedFile(), [...loadAdded(), school]);
@@ -100,4 +120,4 @@ function mergeAdded(sheetSchools) {
   return { schools: [...sheetSchools, ...extra], kept: extra.length };
 }
 
-module.exports = { addSchool, removeSchool, mergeAdded, loadAdded, SchoolListError };
+module.exports = { addSchool, prepareSchool, removeSchool, mergeAdded, loadAdded, SchoolListError };

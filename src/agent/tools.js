@@ -1,6 +1,6 @@
 'use strict';
 // The things the assistant can do. Every tool only reads what is already saved on this computer.
-// Two of them (propose_scrape, propose_sheet_file) do not act at all: they hand the person a button, and nothing
+// Some of them (propose_scrape, propose_sheet_file, propose_spreadsheet, propose_add_school) do not act at all: they hand the person a button, and nothing
 // happens until the person presses it. There is no tool that writes, sends, publishes or deletes anything.
 //
 // Each tool returns { data, label, proposal? }: data goes back to the AI, label is the line shown to the person,
@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { PATHS, alnum, clip } = require('../lib/util');
+const schoolList = require('../lib/school-list');   // the checks the Add a school panel uses: the tool only checks and proposes, the person's click adds
 
 class ToolError extends Error {}   // the message goes back to the AI so it can correct itself
 
@@ -311,6 +312,49 @@ function createTools(deps) {
         data: { proposal_shown: true, what: label, schools: count, estimated_time: eta, note: 'Nothing has started. The person must press the button under your answer. Schools already saved are reused, and a scrape can be stopped from the Run scraper page.' },
         label: `Prepared a button: ${label} (${plural(count, 'school')})`,
         proposal: { kind: 'scrape', title: `Read ${label}`, detail: `${plural(count, 'school')}, ${eta}. The websites are read politely, so keep the dashboard open.`, count, body, button: 'Start the scrape' },
+      };
+    },
+  });
+
+  tools.push({
+    name: 'propose_add_school',
+    description: 'Prepare a button that adds ONE school to the Schools list (the same as the Add a school panel). It does NOT add anything: the person has to press the button. Use it when the person asks to add a school that is not in the list, after checking with search_schools that it is not already there. Give ONLY what the person told you: the name (required; written the way the list writes names, for example "Name (Upper) School" for a division), and optionally website, tier (1, 2 or 3), region and the application (Ravenna) link. NEVER guess, look up or search for a website, tier or region the person did not give: leave it out and say it can be added later. The button only adds the name to the list; it does not read the school\'s website.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The school\'s name, as the person gave it.' },
+        website: { type: 'string', description: 'Only if the person gave it.' },
+        tier: { type: 'integer', enum: [1, 2, 3], description: 'Only if the person gave it.' },
+        region: { type: 'string', description: 'Only if the person gave it, for example "San Francisco, CA".' },
+        portal: { type: 'string', description: 'The application portal (Ravenna) link, only if the person gave it.' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    running: () => 'Preparing an add-school button…',
+    run(input) {
+      let prepared;
+      try {
+        prepared = schoolList.prepareSchool({ name: text(input.name, 140), website: text(input.website, 300), tier: input.tier, region: text(input.region, 100), portal: text(input.portal, 300) }, needList());
+      } catch (e) {
+        if (e instanceof schoolList.SchoolListError) throw new ToolError(e.message);
+        throw e;
+      }
+      const s = prepared.school, similar = prepared.similar;
+      const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+      const body = { name: s.name, website: s.website || '', tier: s.tier == null ? '' : String(s.tier), region: s.region || '', portal: s.portal || '' };
+      const bits = [s.tier ? `Tier ${s.tier}` : 'no tier yet', s.region, s.website ? `website ${host(s.website)}` : 'no website yet', s.portal ? `application link ${host(s.portal)}` : null].filter(Boolean);
+      return {
+        data: {
+          proposal_shown: true, school: s.name, tier: s.tier, region: s.region || undefined, website: s.website || undefined,
+          similar_schools_already_in_the_list: similar.length ? similar : undefined,
+          note: 'Nothing has been added. The person must press the button under your answer. If similar schools are listed, tell the person and ask whether one of them is the school they mean. The button only adds the name; the website is read later, when the person asks.',
+        },
+        label: `Prepared a button: add ${s.name}`,
+        proposal: {
+          kind: 'add-school', title: `Add “${s.name}” to the Schools list`, body, button: 'Add this school',
+          detail: `${bits.join(', ')}. ${similar.length ? `Similar schools are already listed: ${similar.map((x) => x.name).join('; ')}. ` : ''}This only adds the name to the list; the website is not read until you ask.`,
+        },
       };
     },
   });

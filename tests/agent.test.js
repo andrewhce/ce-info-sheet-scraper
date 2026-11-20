@@ -138,10 +138,10 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     const tools = createTools(d);
     assert.deepStrictEqual([...tools.names].sort(), [
       'coverage_overview', 'get_schedule_status', 'get_school_facts', 'list_findings',
-      'propose_scrape', 'propose_sheet_file', 'propose_spreadsheet', 'search_past_answers', 'search_schools', 'search_scraped_pages',
+      'propose_add_school', 'propose_scrape', 'propose_sheet_file', 'propose_spreadsheet', 'search_past_answers', 'search_schools', 'search_scraped_pages',
     ]);
     for (const def of tools.definitions) assert.ok(def.name && def.description.length > 40 && def.input_schema.type === 'object', def.name);
-    ok('ten tools, each described; none writes, sends or deletes');
+    ok('eleven tools, each described; none writes, sends or deletes (four only prepare a button)');
 
     let r = tools.run('search_schools', { query: 'alpha' }).data;
     assert.strictEqual(r.total_matches, 1); assert.strictEqual(r.schools[0].id, 'alpha-academy'); assert.strictEqual(r.schools[0].scrape_status, 'scraped');
@@ -217,6 +217,35 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     assert.throws(() => tools.run('propose_scrape', {}), ToolError);
     assert.throws(() => tools.run('propose_scrape', { tier: 3, only_unscraped: true }), /already been scraped/);
     ok('scrape button is prepared, never started, and validated');
+
+    // adding a school: the tool only checks and proposes; the person's click is what adds
+    const { PATHS } = require('../src/lib/util');
+    const addedBefore = fs.existsSync(path.join(PATHS.data, 'added-schools.json'));
+    const add = tools.run('propose_add_school', { name: '  Westbrook Academy (Upper) School ', website: 'westbrook.example.org', tier: 2, region: 'San Francisco, CA' });
+    assert.strictEqual(add.proposal.kind, 'add-school');
+    assert.deepStrictEqual(add.proposal.body, { name: 'Westbrook Academy (Upper) School', website: 'https://westbrook.example.org/', tier: '2', region: 'San Francisco, CA', portal: '' });
+    assert.strictEqual(add.proposal.button, 'Add this school');
+    assert.match(add.proposal.detail, /Tier 2, San Francisco, CA, website westbrook\.example\.org/);
+    assert.match(add.data.note, /Nothing has been added/);
+    assert.strictEqual(add.data.similar_schools_already_in_the_list, undefined);
+    assert.strictEqual(d.data.getSchools().schools.length, 3, 'the list is unchanged');
+    assert.strictEqual(fs.existsSync(path.join(PATHS.data, 'added-schools.json')), addedBefore, 'nothing was written');
+    const bare = tools.run('propose_add_school', { name: 'Bare Name School' });
+    assert.match(bare.proposal.detail, /no tier yet, no website yet/);
+    assert.strictEqual(tools.run('propose_add_school', { name: 'Ravenna Hill School', portal: 'https://www.ravenna-hub.com/schools/12345' }).proposal.body.portal, 'https://www.ravenna-hub.com/schools/12345');
+    // the refusals are the Add a school panel's own, and go back to the AI so it can tell the person
+    assert.throws(() => tools.run('propose_add_school', { name: 'alpha academy' }), (e) => e instanceof ToolError && /“Alpha Academy” is already in the list/.test(e.message));
+    assert.throws(() => tools.run('propose_add_school', { name: 'ab' }), /at least 3 letters/);
+    assert.throws(() => tools.run('propose_add_school', { name: 'New Hill School', tier: 7 }), /Tier must be 1, 2 or 3/);
+    assert.throws(() => tools.run('propose_add_school', { name: 'New Hill School', website: 'not a site' }), /website address does not look right/);
+    assert.throws(() => tools.run('propose_add_school', {}), ToolError);
+    // a school that may already be listed (a division, or the same website) is pointed out, not refused
+    const div = tools.run('propose_add_school', { name: 'Alpha Academy (Upper) School' });
+    assert.deepStrictEqual(div.data.similar_schools_already_in_the_list.map((x) => x.id), ['alpha-academy']);
+    assert.match(div.proposal.detail, /Similar schools are already listed: Alpha Academy\./);
+    const sameSite = tools.run('propose_add_school', { name: 'Delta Preparatory', website: 'https://www.gamma.example.org/about' });
+    assert.deepStrictEqual(sameSite.data.similar_schools_already_in_the_list.map((x) => x.id), ['gamma-school']);
+    ok('add-school button: only checks and proposes, refuses what the Add a school panel refuses, and points out similar schools');
 
     assert.strictEqual(tools.run('propose_sheet_file', { all: true }).proposal.query, 'all=1');
     const some = tools.run('propose_sheet_file', { school_ids: ['alpha-academy', 'beta-school'] });
@@ -310,7 +339,7 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     assert.strictEqual(s.calls.length, 2);
     const first = s.calls[0];
     assert.strictEqual(first.model, 'claude-opus-5-5'); assert.deepStrictEqual(first.betas, ['server-side-fallback-2026-07-01']); assert.strictEqual(first.fallbacks, 'default');
-    assert.deepStrictEqual(first.output_config, { effort: 'medium' }); assert.strictEqual(first.tools.length, 10); assert.ok(first.system[0].text.includes('SAFETY'));
+    assert.deepStrictEqual(first.output_config, { effort: 'medium' }); assert.strictEqual(first.tools.length, 11); assert.ok(first.system[0].text.includes('SAFETY'));
     assert.deepStrictEqual(first.system[0].cache_control, { type: 'ephemeral' });
     assert.strictEqual(first.messages.length, 1); assert.strictEqual(first.thinking, undefined, 'thinking is left to the model');
     const second = s.calls[1].messages;
@@ -433,7 +462,7 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     assert.strictEqual(out.content[0].text, 'Hi'); assert.strictEqual(seen.length, 3); assert.deepStrictEqual(waits, [2250]);
     const sent = JSON.parse(seen[0].init.body);
     assert.strictEqual(seen[0].url, 'https://api.groq.com/openai/v1/chat/completions'); assert.strictEqual(seen[0].init.headers.Authorization, 'Bearer ' + GROQ);
-    assert.strictEqual(sent.model, 'llama-3.3-70b-versatile'); assert.strictEqual(sent.tools.length, 10); assert.strictEqual(sent.tools[0].function.parameters.type, 'object'); assert.strictEqual(sent.tool_choice, 'auto');
+    assert.strictEqual(sent.model, 'llama-3.3-70b-versatile'); assert.strictEqual(sent.tools.length, 11); assert.strictEqual(sent.tools[0].function.parameters.type, 'object'); assert.strictEqual(sent.tool_choice, 'auto');
     ok('Groq: sends the OpenAI format with the key, waits when told to slow down, retries a malformed tool call once');
 
     const g401 = groqProvider({ apiKey: GROQ, fetchImpl: async () => respond(401, { error: { message: 'Invalid API Key' } }) });
@@ -625,7 +654,7 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     const ct = await go(baseRun(), anthropicProvider(cap.client), 'List everything');
     assert.strictEqual(cap.calls[0].tool_choice, undefined);
     assert.deepStrictEqual(cap.calls[1].tool_choice, { type: 'none' });
-    assert.ok(cap.calls[1].tools.length === 10, 'tools stay listed so the cached prefix is kept');
+    assert.ok(cap.calls[1].tools.length === 11, 'tools stay listed so the cached prefix is kept');
     assert.ok(ct.answer.startsWith('Here is what I found.') && new RegExp(`stopped looking after ${MAX_LOOKUPS} lookups`).test(ct.answer));
     assert.strictEqual(ct.stoppedEarly, true);
     const few = scripted(reply([use('f1', 'search_schools', { query: 'alpha' })], 'tool_use'), reply([text('ok')]));
@@ -646,8 +675,8 @@ const request = (port, method, p, { headers = {}, body } = {}) => new Promise((r
     assert.ok(!off.calls[0].tools.some((t) => t.name === 'web_search'), 'web search is off unless switched on');
     const on = scripted(reply([text('x')]));
     await go(baseRun(), anthropicProvider(on.client, { webSearch: true }), 'Search the web for Alpha Academy tuition');
-    assert.strictEqual(on.calls[0].tools.length, 11);
-    assert.deepStrictEqual(on.calls[0].tools[10], { type: 'web_search_20260209', name: 'web_search', max_uses: 3 });
+    assert.strictEqual(on.calls[0].tools.length, 12);
+    assert.deepStrictEqual(on.calls[0].tools[11], { type: 'web_search_20260209', name: 'web_search', max_uses: 3 });
     assert.strictEqual(webSearchTool('claude-haiku-5-5').type, 'web_search_20250305', 'Haiku has only the plain version');
     assert.strictEqual(webSearchTool('claude-sonnet-5-5').type, 'web_search_20260209');
     ok('web search is off by default and offered in the right version for the model');

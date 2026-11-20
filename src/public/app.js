@@ -1970,6 +1970,11 @@
           await api('/api/run', p.body);
           p.state = 'done'; p.message = 'Started. Watch it on the Check websites page.';
           S.log = []; location.hash = '#/run'; poll(true);
+        } else if (p.kind === 'add-school') {
+          // the same route as the Add a school panel, with the same checks: the server refuses a duplicate or a bad address
+          const r = await api('/api/schools/add', p.body);
+          await loadOverview();
+          p.state = 'done'; p.message = `Added “${r.school.name}” to the Schools list.`; p.link = '#/school/' + encodeURIComponent(r.school.id);
         } else if (p.kind === 'spreadsheet') {
           const f = await downloadSpreadsheet(Object.fromEntries(new URLSearchParams(p.query || '')));
           p.state = 'done'; p.message = `Downloaded “${f.name}” (${f.count} school${f.count === 1 ? '' : 's'}).`;
@@ -1981,7 +1986,7 @@
       drawChat();
     };
     return h('div', { class: 'proposal' }, h('b', null, p.title), h('p', { class: 'small muted' }, p.detail),
-      h('div', { class: 'runbtns' }, btn), p.message ? h('p', { class: 'small ' + (p.bad ? 'bad' : 'good') }, p.message) : null);
+      h('div', { class: 'runbtns' }, btn), p.message ? h('p', { class: 'small ' + (p.bad ? 'bad' : 'good') }, p.message, p.link ? [' ', h('a', { href: p.link }, 'Open the school')] : null) : null);
   }
 
   function memoryBadgeText(m) {
