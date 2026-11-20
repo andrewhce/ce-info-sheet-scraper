@@ -6,13 +6,49 @@ earlier ones left empty. It never replaces an answer.
 | Order | Source | How it is read |
 | --- | --- | --- |
 | 1 | The school's own website (and its PDFs) | Automatically, by the scraper. Or from pages saved by hand when the site blocks the scraper. |
-| 2 | Ravenna (the school's own application platform) | From a page a person saved. |
-| 3 | Niche | From a page a person saved. |
-| 4 | Private School Review and Boarding School Review | From a page a person saved. |
+| 2 | Niche | From a page a person saved. |
+| 3 | Private School Review and Boarding School Review | From a page a person saved. |
+| (own column) | Ravenna (the school's own application platform) | From a page a person saved. See "Ravenna" below: it is not a fallback. |
 
-An answer filled from sources 2 to 4 is marked on the school's page ("From Niche (saved page)"), says in its note that the
+An answer filled from Niche or a review site is marked on the school's page ("From Niche (saved page)"), says in its note that the
 school's website did not give it, links to the saved page's own web address, gets a lower trust score than a website answer
 (the trust score looks at where an answer came from), and appears in the Excel export and in the Ask page with the same note.
+
+## Ravenna: the Admissions Portal column
+
+In your sheet, the Guide to Applying rows have two columns: column B is the **Admissions Portal** (Ravenna, Gateway ...) and column C
+is the **School Website**. Both are filled for the same question, so Ravenna's answers are not a fallback for blanks like Niche's.
+They are kept separately (`portalFields` in the school's result), shown in their own blue block under the website's answer on the
+school's page, and sent to **column B** by the Google Sheet script and as their own line in the Excel and CSV files.
+
+A saved Ravenna page is a family's application to one school. The dashboard reads the school's own steps, in order, under the
+page's section names ("Preliminary Application Steps", "Additional Steps"), and keeps the school's own wording, including a
+Spanish second name if the school uses one:
+
+| Question in the sheet | From the Ravenna page |
+| --- | --- |
+| Application | "Admission for 2027-2028, Grade 6", then the steps numbered under their sections, with due dates, and "Application fee: $100" when a step's text states one |
+| Application Timeline | each section's "forms due by" and each step's and form's own due date, in page order |
+| Recommendations | the recommendation step's text and its forms, with "requires 2 delegates" and the due date |
+| Transcripts | the transcript step's text and its forms |
+| Testing Policy | the step about testing (SSAT, ISEE, "Testing") |
+| PWS | the writing-sample step |
+| Interviews | steps about an interview, campus visit, shadow day, playdate or assessment |
+| Events | every step with a "Register for an event" link, with its first sentences |
+| Decision Release Date | the sentence of the decision step that says when |
+
+"Welcome" greeting steps are left out. Essays/Questionnaires is not filled from Ravenna: the questions are inside the forms,
+which the page does not show (the steps "Parent Questionnaire" and "Student Essay" are in the Application list).
+
+**The family's details are never kept.** The page holds the applicant's name, birthdate, photo and email, the account holder's
+name, sign-in tokens, messages from the school and how far the family has got with each form. When a page is added, the
+dashboard keeps only the school's name, the grade and year, and the school's own steps (scripts, tokens, every attribute,
+the sidebar, the menu and form progress are removed). It is still best to save pages from a Ravenna account made for this
+purpose, and to treat the original file you saved as private.
+
+A Ravenna page is checked against the school it is added to by the school's name on the page (a Belmont Oaks page added under
+Castilleja is refused). The grade says which division it belongs to: a Grade 6 application is the middle school's, and a
+many-at-once drop puts it there. A Grade 6 page added under an upper school is kept with a warning.
 
 ## Why the pages are saved by hand
 
@@ -95,9 +131,9 @@ structured data.
   navigation; both are handled. Niche's own office address (in the page's structured data) is never used as the school's.
   Answers keep Niche's own words ("Interview Required: Yes"). When a division school (Upper, Middle) is filled from a page about
   the whole school, the answers carry a note to check that the figure applies to that division.
-- **Ravenna** uses a general reader: definition lists, two-column table rows, label and value elements with matching class
-  names, and "Label: value" lines. It has not been tuned on a real saved page yet: if a page shows "nothing read" on the Ravenna
-  & reviews page, send that file so the reader can be set up for its layout.
+- **Ravenna** was checked against three real saved applications (Belmont Oaks Academy, National Presbyterian School, Castilleja): see
+  "Ravenna: the Admissions Portal column" above. A Ravenna page without application steps (another kind of page) is read with the
+  school-website rules for the application questions only.
 - **Ravenna** pages are also read with the same rules as school websites, but only for application questions (open and decision
   dates, steps, recommendations, transcripts, testing policy, interviews, essays, events, tuition).
 

@@ -21,7 +21,8 @@ PLAIN LANGUAGE (the readers are admissions researchers, not technical staff)
 - Match labels: match = "same as your sheet"; differs = "different from your sheet"; fills = "the website can fill your blank"; both = "both have an answer (compare them)"; sheet-only = "only your sheet has it"; none = "not found on the website".
 - Confidence from a tool: high = "exact match", medium = "probable match", low = "please double-check". The dashboard's own ratings are "Safe to use", "Quick look" and "Check this".
 - When the sheet and a website differ, say what it means: "Your sheet says X and the website says Y. Your sheet may simply be out of date, so open the school's page to check."
-- When a saved answer has a source_site (Ravenna, Niche, Private School Review or Boarding School Review), it did NOT come from the school's own website: say which site it came from ("Niche says 7:1; the school's own website did not give this"). The school's website is always the first source, then Ravenna, then Niche, then the two review sites.
+- When a saved answer has a source_site (Niche, Private School Review or Boarding School Review), it did NOT come from the school's own website: say which site it came from ("Niche says 7:1; the school's own website did not give this"). The school's website is always the first source, then Niche, then the two review sites.
+- admissions_portal_ravenna is the school's application steps, forms and due dates from Ravenna, its admissions portal. It is a separate answer beside the website's (the sheet keeps the two in different columns), never a replacement for it: when both exist, give both and say which is which.
 - End with one clear next step when there is one (for example "Open the school's page to check it").
 
 WHAT THE DATA MEANS

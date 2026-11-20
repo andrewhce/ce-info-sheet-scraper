@@ -119,6 +119,16 @@ function buildExport(id, tabIndex = 0) {
       key: row.key, label: row.label, value: String(row.scraped.value).slice(0, 8000), confidence: row.scraped.confidence,
       sources: (row.scraped.sources || []).filter((s) => /^https?:\/\//i.test(s.url)).map((s) => ({ url: s.url, title: s.title })),
       note: row.scraped.note || null,
+      origin: row.scraped.source && row.scraped.source.label ? row.scraped.source.label : null,   // Niche or a review site, when the website had no answer
+    });
+  }
+  // the admissions portal's (Ravenna) answers go in column B of the Guide to Applying rows ("Admissions Portal"), next to the website's column C
+  for (const row of p.rows) {
+    if (row.kind !== 'field' || !row.portal || row.portal.status !== 'found') continue;
+    fields.push({
+      key: row.key, label: row.label, value: String(row.portal.value).slice(0, 8000), confidence: row.portal.confidence,
+      sources: (row.portal.sources || []).filter((s) => /^https?:\/\//i.test(s.url)).map((s) => ({ url: s.url, title: s.title })),
+      note: row.portal.note || null, column: 'B', origin: 'Admissions portal (Ravenna)',
     });
   }
   const tab = p.tabs[p.tabIndex];

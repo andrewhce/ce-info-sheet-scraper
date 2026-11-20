@@ -229,6 +229,37 @@ const check = (name, fn) => { fn(); passed++; console.log('  ok   ' + name); };
     assert.ok(tab.cell(rows.tuition, 2).d.length > 3 && tab.cell(rows.tuition, 3).d === '');
   });
 
+  // 3b. the admissions portal's (Ravenna) answers have their own column
+  check('admissions portal answers go in column B of the guide rows, next to the website’s column C, each with its own note; a person’s cell is never overwritten', () => {
+    const tab = clone(template, 'Portal School');
+    const run = loadScript(mkSs(tab), { EXPORT_TOKEN: TOKEN });
+    const rows = run.ctx.locateRows_(tab).rows;
+    const f = (key, value, extra) => ({ key, label: key, value, confidence: 'high', sources: [{ url: 'https://example.edu/a' }], ...(extra || {}) });
+    const payload = { ...JSON.parse(JSON.stringify(castPayload)), fields: [
+      f('application', 'The website’s steps'),
+      f('application', '1. Register for Open House\n2. Complete Application Form', { column: 'B', origin: 'Admissions portal (Ravenna)' }),
+      f('timeline', 'Forms due Jan 30th 2027', { column: 'B', origin: 'Admissions portal (Ravenna)' }),
+      f('ratio', '8:1', { origin: 'Niche' }),
+    ] };
+    payload.school = { ...payload.school, name: 'Portal School', tab: 'Portal School' };
+    const res = run.post({ ...payload, token: TOKEN });
+    assert.strictEqual(res.ok, true, res.error);
+    assert.strictEqual(tab.cell(rows.application, 3).d, 'The website’s steps', 'the website’s answer stays in column C');
+    assert.strictEqual(tab.cell(rows.application, 2).d, '1. Register for Open House\n2. Complete Application Form', 'the portal’s answer is in column B');
+    assert.strictEqual(tab.cell(rows.timeline, 2).d, 'Forms due Jan 30th 2027');
+    assert.strictEqual(tab.cell(rows.timeline, 3).d, template.cell(rows.timeline, 3).d, 'column C of a row only the portal answered is untouched');
+    assert.ok(tab.cell(rows.application, 2).note.includes('FILLED FROM ADMISSIONS PORTAL (RAVENNA)'), tab.cell(rows.application, 2).note);
+    assert.ok(tab.cell(rows.application, 3).note.includes('FILLED FROM WEBSITE'), tab.cell(rows.application, 3).note);
+    assert.ok(tab.cell(rows.ratio, 2).note.includes('FILLED FROM NICHE'), 'an answer from Niche is not called a website answer: ' + tab.cell(rows.ratio, 2).note);
+    // a second export with a different portal answer leaves what is in the cell and says so in a note
+    const again = { ...payload, fields: [f('application', 'Start with a different first step instead', { column: 'B', origin: 'Admissions portal (Ravenna)' })] };
+    const res2 = run.post({ ...again, token: TOKEN });
+    assert.strictEqual(res2.summary.flagged, 1, JSON.stringify(res2.summary));
+    assert.strictEqual(tab.cell(rows.application, 2).d, '1. Register for Open House\n2. Complete Application Form');
+    const note = tab.cell(rows.application, 2).note;
+    assert.ok(note.includes('UPDATED INFO ON ADMISSIONS PORTAL (RAVENNA) (cell not overwritten)') && note.includes('Admissions portal (Ravenna) says:') && note.includes('Start with a different first step instead'), note);
+  });
+
   // 4. a school with no tab gets one, made from the template, with the two-column header row
   check('no tab: a new one is made from the Master Template', () => {
     const ss = mkSs(clone(template, 'Master Template'));

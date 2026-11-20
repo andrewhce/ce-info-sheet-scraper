@@ -11,7 +11,8 @@
   per website. A site that refuses automated visits is marked "Blocked by site" and left alone.
 - **Cannot log in.** Anything that exists only inside an admissions portal (Ravenna, Gateway and so on), such as the exact
   essay prompts, will not be found automatically. For Ravenna a person signs in, saves the page and adds the file on the
-  **Ravenna & reviews** page.
+  **Ravenna & reviews** page: its steps become the school's Admissions Portal answers, in their own column beside the website's
+  (docs/SOURCES.md), and the family's details in the saved page are thrown away.
 - Two template rows are never looked up: Further Notes and Peer Schools. Homework hours usually come from third-party
   sites, so they are almost always blank.
 - Paragraph rows (application steps, interviews, essays, events) are copied sections of the school's page, not summaries.
@@ -45,6 +46,12 @@ from an earlier year or another site. Open the school page to see the page the w
 
 School facts and the Events rows go in column **B**. The Guide to Applying rows and the Facts Sheet links go in column
 **C** ("School Website"). Columns A and D are never touched.
+
+The one exception is Ravenna: its answers (the school's application steps from a saved Ravenna page, docs/SOURCES.md) go in
+column **B** of the Guide to Applying rows, which your sheet names "Admissions Portal", next to the website's column C. The
+script inside the Google Sheet copy must be the current `google-sheet/Code.gs` for this: an older copy ignores the column and
+writes every Guide answer to column C. A cell that already holds something different is never overwritten: the script adds a
+note saying what the portal says.
 
 ## Commands
 

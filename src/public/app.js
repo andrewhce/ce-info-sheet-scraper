@@ -711,7 +711,7 @@
         } catch (e) { setKids(detail, h('span', { class: 'bad' }, e.message)); }
       };
       const status = mine
-        ? [h('span', { class: 'chip ' + (mine.filled > 0 ? 'ok' : 'warn'), title: mine.filled > 0 ? 'Answers that now come from this source because the website did not give them' : 'Nothing was read from the saved page(s), or the website already answered everything the page holds.' },
+        ? [h('span', { class: 'chip ' + (mine.filled > 0 ? 'ok' : 'warn'), title: key === 'ravenna' ? (mine.filled > 0 ? 'Admissions Portal answers read from these pages. They sit beside the website’s answers.' : 'No application steps were recognised on the saved page(s).') : (mine.filled > 0 ? 'Answers that now come from this source because the website did not give them' : 'Nothing was read from the saved page(s), or the website already answered everything the page holds.') },
           `${mine.pages} page${mine.pages === 1 ? '' : 's'} · ${mine.filled || 0} filled`),
         mine.facts === 0 ? h('span', { class: 'chip warn', title: 'No labelled facts were recognised on this page. Send an example to be set up.' }, 'nothing read') : null,
         mine.warning ? h('span', { class: 'chip warn', title: 'Open the pages to see the warning' }, 'check') : null,
@@ -739,7 +739,7 @@
       for (const [k, el] of tabCounts) el.textContent = ` ${savedCount(k)}`;
       const withPages = d.schools.filter((s) => (d.pages[s.id] || {})[key]).length;
       const filled = d.schools.reduce((n, s) => n + (((d.pages[s.id] || {})[key] || {}).filled || 0), 0);
-      summaryEl.textContent = withPages ? `${withPages} school${withPages === 1 ? '' : 's'} have saved ${src.label} pages, which filled ${filled} answer${filled === 1 ? '' : 's'} the websites did not give.` : `No ${src.label} pages saved yet.`;
+      summaryEl.textContent = withPages ? (key === 'ravenna' ? `${withPages} school${withPages === 1 ? '' : 's'} have saved Ravenna pages, which gave ${filled} Admissions Portal answer${filled === 1 ? '' : 's'}.` : `${withPages} school${withPages === 1 ? '' : 's'} have saved ${src.label} pages, which filled ${filled} answer${filled === 1 ? '' : 's'} the websites did not give.`) : `No ${src.label} pages saved yet.`;
       setKids(tbody, list.length ? list.slice(0, 400).map(rowFor) : h('tr', null, h('td', { colspan: 4, class: 'empty' }, 'No schools match.')));
     }
 
@@ -756,8 +756,9 @@
     app.replaceChildren(
       h('div', { class: 'pagehead' }, h('div', { class: 'grow' }, h('h1', null, 'Ravenna and other sources'),
         h('p', null, 'The school’s own website is always read first. For a question the website does not answer, the dashboard fills it from pages you saved by hand, in this order: ',
-          h('b', null, '1. the school’s website, 2. Ravenna, 3. Niche, 4. Private School Review and Boarding School Review'), '. Every answer shows which site it came from, and a later source never replaces an earlier one.'),
-        h('p', { class: 'muted small' }, 'Why saved by hand? Niche blocks automatic readers, Private School Review’s terms of use do not allow them, and Ravenna needs your login. So you open the page in your own browser, save it, and add the file here. The dashboard never contacts these sites.'))),
+          h('b', null, '1. the school’s website, 2. Niche, 3. Private School Review and Boarding School Review'), '. Every answer shows which site it came from, and a later source never replaces an earlier one. ',
+          h('b', null, 'Ravenna is different:'), ' the school’s application steps in Ravenna are its “Admissions Portal” answers. They sit beside the website’s answers (your sheet keeps them in column B, the website’s in column C) and never take their place.'),
+        h('p', { class: 'muted small' }, 'Why saved by hand? Niche blocks automatic readers, Private School Review’s terms of use do not allow them, and Ravenna needs your login. So you open the page in your own browser, save it, and add the file here. The dashboard never contacts these sites. A saved Ravenna page is a family’s application, so the dashboard keeps only the school’s own steps and throws away the applicant’s name, birthdate, email and sign-in details.'))),
       tabs,
       h('p', { class: 'small muted' }, src.blurb),
       h('details', { class: 'panel' }, h('summary', null, `How to add ${src.label} pages`),
@@ -991,6 +992,18 @@
           f.alts ? h('ul', { class: 'alts' }, f.alts.map((a) => h('li', null, a.value.length > 220 ? a.value.slice(0, 220) + '…' : a.value, ' — ', ext(a.url)))) : null),
       ];
     };
+    // the admissions portal's (Ravenna) answer to the same question: its own block, because the sheet has a column for it next to the website's
+    const portalBlock = (row) => {
+      const f = row.portal;
+      if (!f || f.status !== 'found') return null;
+      const srcs = (f.sources || []).filter((x) => safeUrl(x.url));
+      const copyBtn = h('button', { type: 'button', class: 'btn copybtn', title: 'Copy this value to paste into the Admissions Portal column of your sheet', onclick: () => copyText(f.value, copyBtn) }, 'Copy');
+      return h('div', { class: 'portalblock' },
+        h('div', null, h('span', { class: 'chip info', title: 'These are the school’s own application steps in Ravenna, read from a page saved by hand. In your sheet they go in column B (Admissions Portal), next to the website’s column C.' }, 'Admissions portal (Ravenna)')),
+        clamped(f.value, copyBtn),
+        srcs.length ? h('div', { class: 'src' }, 'From: ', srcs.map((x, i) => [i ? ', ' : '', ext(x.url, null, x.title)])) : null,
+        h('details', null, h('summary', null, 'Show the words from the Ravenna page'), h('div', { class: 'evidence' }, f.snippet || '')));
+    };
     const drawRows = () => {
       const kids = [];
       let any = false;
@@ -1009,7 +1022,7 @@
         kids.push(h('div', { class: 'frow' },
           h('div', { class: 'label' }, h('b', null, row.label), h('span', { class: 'rownum' }, 'Row ' + row.row + ' in your sheet'), chip(VERDICT[row.verdict])),
           h('div', { class: 'cell', 'data-title': 'What your sheet says now' }, sheetCell(row)),
-          h('div', { class: 'cell', 'data-title': 'What the school’s website says' }, scrapedCell(row), verifyControl(row))));
+          h('div', { class: 'cell', 'data-title': 'What the school’s website says' }, scrapedCell(row), portalBlock(row), verifyControl(row))));
       }
       if (!any) kids.push(h('p', { class: 'empty' }, 'No questions in this group.'));
       rowsBox.replaceChildren(...kids);

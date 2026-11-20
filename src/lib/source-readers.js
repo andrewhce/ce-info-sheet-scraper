@@ -326,13 +326,168 @@ function readApplicationText(rec, school, now) {
   return out;
 }
 
+// ----------------------------------------------------------------------------------- Ravenna application pages ---
+// A saved Ravenna page is a family's application to one school: the school's name, the grade and year applied for, and the school's own
+// steps in order (their names, descriptions, forms, events and due dates). It also holds the applicant's details and sign-in tokens, which
+// are never needed and never kept (sanitizeRavenna). The steps are the school's "Admissions Portal" answers: in the sheet they go in the
+// Guide to Applying rows' own column B ("Admissions Portal"), next to the website's answers in column C, not in place of them.
+
+const clean1 = (s) => clean(s).replace(/\s*[|]\s*/g, ' ');
+/** The first sentences of a text, up to about `max` characters. */
+function sentences(text, max) {
+  const parts = clean(text).split(/(?<=[.!?])\s+/);
+  let out = '';
+  for (const s of parts) { if (out && out.length + s.length + 1 > max) break; out += (out ? ' ' : '') + s; if (out.length >= max) break; }
+  return clip(out, max + 40);
+}
+const dueText = (d) => clean(d).replace(/^Forms due by\s*/i, '').replace(/^Due:\s*/i, '');
+const RAV_RE = {
+  recommend: /recommend|evaluation form|teacher (form|eval)|reference/i,
+  transcript: /transcript|school report|academic record|grade report/i,
+  testing: /\b(?:ssat|isee|hspt|standardi[sz]ed|testing|tests?)\b/i,
+  writing: /writing sample|timed writing|writing exercise|writing assessment/i,
+  interview: /interview|shadow|play ?date|student visit|campus visit|classroom visit|observation|assessment/i,
+  decision: /decision|notification/i,
+};
+const GRADE_BAND = (g) => { const x = String(g || '').toUpperCase(); if (/^(PK|PS|TK|K|JK)/.test(x)) return 'lower'; const n = parseInt(x, 10); if (!(n >= 1 && n <= 12)) return null; return n <= 5 ? 'lower' : n <= 8 ? 'middle' : 'upper'; };
+
+/** The steps of a Ravenna application page, in order, without the page's hidden interface states. */
+function parseRavenna($) {
+  $('[hidden]').remove();
+  const t = (el) => clean($(el).text());
+  const card = t($('#application-card p').first());
+  const meta = {
+    school: t('#application-card-school-name'),
+    grade: (/\bGrade\s+([A-Za-z0-9]{1,3})\b/.exec(card) || [])[1] || null,
+    year: ((/\b(20\d{2}\s*-\s*20\d{2})\b/.exec(card) || [])[1] || '').replace(/\s+/g, '') || null,
+  };
+  const sections = [];
+  let cur = null;
+  $('#application-content').find('.application-step-divider, .application-step[id^="step-"]').each((_, el) => {
+    const e = $(el);
+    if (e.hasClass('application-step-divider')) { cur = { name: t(e.find('.heading')), due: t(e.find('small')), steps: [] }; sections.push(cur); return; }
+    if (!cur) { cur = { name: '', due: '', steps: [] }; sections.push(cur); }
+    const header = e.find('.application-step-header').first().clone();
+    header.find('button, small').remove();
+    const forms = [];
+    e.find('application-form-item').each((__, fi) => {
+      const a = $(fi).find('a').first();
+      const nameEl = a.clone(); nameEl.find('span, small, i, br, .icon-container').remove();
+      const bits = [];
+      a.find('span, small').each((___, x) => { if ($(x).children().length === 0) { const tx = t(x); if (tx) bits.push(tx); } });
+      forms.push({
+        name: clean(nameEl.text()),
+        delegates: ((bits.find((b) => /^Requires\b.*\bdelegates?$/i.test(b)) || '').replace(/^Requires\s*/i, '')) || '',
+        due: dueText(bits.find((b) => /^Due:/i.test(b)) || ''),
+      });
+    });
+    const event = e.find('.application-step-item-list a').not('application-form-item a').toArray().some((a) => /register for an event/i.test(t(a)));
+    cur.steps.push({
+      name: clean(header.text()), due: dueText(t(e.find('.application-step-header small'))),
+      desc: e.find('.application-step-body > div > p').map((__, p) => t(p)).get().filter(Boolean).join(' '),
+      forms, event,
+    });
+  });
+  return { meta, sections: sections.filter((s) => s.steps.length || s.due) };
+}
+
+/** What a saved page says about itself (school name, grade, year), without reading any answers: used to check and place an uploaded page. */
+function ravennaMeta(html) {
+  try { const m = parseRavenna(cheerio.load(html || '')).meta; return m.school ? m : null; } catch { return null; }
+}
+
+function readRavenna(rec) {
+  const $ = cheerio.load(rec._html || '');
+  const parsed = parseRavenna($);
+  const meta = parsed.meta;
+  // a "Welcome" step is a greeting, not a step of the application (it may still carry a "Register for an event" link)
+  const sections = parsed.sections.map((s) => ({ ...s, steps: s.steps.filter((st) => !(/^welcome/i.test(st.name) && !st.forms.length)) })).filter((s) => s.steps.length);
+  const steps = sections.flatMap((s) => s.steps);
+  if (!steps.length) return null;
+  const url = rec.finalUrl || rec.url, title = rec.title || '';
+  const fields = {};
+  const put = (key, lines, evidence) => {
+    const value = lines.filter(Boolean).join('\n');
+    if (value) fields[key] = { status: 'found', value, confidence: 'high', sources: [{ url, title }], snippet: clip(evidence || value, 460), how: 'Ravenna steps' };
+  };
+  const formNames = (st) => st.forms.map((f) => f.name).join(' ');
+  const formMeta = (f) => { const bits = [f.delegates && `requires ${f.delegates}`, f.due && `due ${f.due}`].filter(Boolean); return bits.length ? ` (${bits.join('; ')})` : ''; };
+  const describe = (st, max, withForms) => [
+    `${st.name}${st.desc ? ': ' + sentences(st.desc, max) : ''}`,
+    ...(withForms ? st.forms.map((f) => `- ${f.name}${formMeta(f)}`) : []),
+  ];
+  const pick = (re) => steps.filter((st) => re.test(`${st.name} ${formNames(st)}`));
+
+  // the steps in order, under the page's own section names ("Preliminary Application Steps", "Additional Steps"), and the application fee
+  const lines = [];
+  if (meta.year || meta.grade) lines.push(`Admission for ${[meta.year, meta.grade && `Grade ${meta.grade}`].filter(Boolean).join(', ')}`);
+  let n = 0;
+  for (const sec of sections) {
+    const list = sec.steps;
+    if (!list.length) continue;
+    if (sec.name) lines.push(`${sec.name}${sec.due ? ` (${clean1(sec.due).replace(/^Forms due by/i, 'forms due')})` : ''}`);
+    for (const st of list) lines.push(`${++n}. ${st.name}${st.due ? ` (due ${st.due})` : ''}`);
+  }
+  const fee = steps.filter((st) => /fee|application/i.test(st.name)).map((st) => /application fee[^$.]{0,60}(\$\s?\d[\d,]*(?:\.\d{2})?)|(\$\s?\d[\d,]*(?:\.\d{2})?)\s*(?:non-refundable\s*)?application fee/i.exec(st.desc)).find(Boolean);
+  if (fee) lines.push(`Application fee: ${(fee[1] || fee[2]).replace(/\s+/g, '')}`);
+  if (n) put('application', lines, steps.slice(0, 3).map((s) => s.name).join(' · '));
+
+  // dates, in page order: the section's "forms due by", then each step and form with its own due date
+  const seen = new Set(), dates = [];
+  const add = (line) => { if (!seen.has(line)) { seen.add(line); dates.push(line); } };
+  for (const sec of sections) {
+    if (sec.due) add(`${sec.name || 'Steps'}: forms due ${dueText(sec.due)}`);
+    for (const st of sec.steps) {
+      if (st.due) add(`${st.name}: due ${st.due}`);
+      for (const f of st.forms) if (f.due && f.due !== st.due) add(`${f.name}: due ${f.due}`);
+    }
+  }
+  put('timeline', dates, dates.slice(0, 3).join(' · '));
+
+  const rec1 = pick(RAV_RE.recommend); put('recommendations', rec1.flatMap((st) => describe(st, 260, true)), rec1.map((s) => s.name).join(' · '));
+  const tr = pick(RAV_RE.transcript); put('transcripts', tr.flatMap((st) => describe(st, 520, true)), tr.map((s) => s.name).join(' · '));
+  const te = pick(RAV_RE.testing); put('testingPolicy', te.flatMap((st) => describe(st, 520, false)), te.map((s) => s.name).join(' · '));
+  const pw = pick(RAV_RE.writing); put('pws', pw.flatMap((st) => describe(st, 420, false)), pw.map((s) => s.name).join(' · '));
+  const iv = pick(RAV_RE.interview).filter((st) => !RAV_RE.writing.test(st.name)); put('interviews', iv.flatMap((st) => describe(st, 420, false)), iv.map((s) => s.name).join(' · '));
+  const ev = steps.filter((st) => st.event); put('guideEvents', ev.map((st) => `${st.name}${st.desc ? ': ' + sentences(st.desc, 220) : ''}`), ev.map((s) => s.name).join(' · '));
+  const dc = pick(RAV_RE.decision);
+  put('decisionDate', dc.map((st) => { const sent = clean(st.desc).split(/(?<=[.!?])\s+/).find((x) => /decision|notif/i.test(x)); return sent ? clip(sent, 240) : st.name + (st.due ? `: ${st.due}` : ''); }), dc.map((s) => s.name).join(' · '));
+  return { fields, meta, pairs: steps.length };
+}
+
+/**
+ * A saved Ravenna page without the family's details, ready to keep. Removes the scripts, tokens, the applicant's name, birthdate, photo and
+ * email, the account holder's name, messages from the school, and how far the family has got with each form; keeps the school's name, the
+ * grade and year applied for, and every step with its description, forms, events and due dates.
+ */
+function sanitizeRavenna(html) {
+  const $ = cheerio.load(String(html || ''));
+  const meta = parseRavenna(cheerio.load(String(html || ''))).meta;
+  $('script, style, iframe, svg, img, link, meta, noscript, template, video, audio, canvas, input, textarea, select, button, form, hub-app, flash, grammarly-desktop-integration, #main-navbar, #footer, #contextHelp, #application-sidebar, .application-icons-legend, [hidden]').remove();
+  // the line under the school's name holds the applicant's name ("Avery Placeholder • Grade K Admission for 2027-2028"): keep only the grade and year
+  $('#application-card p').first().text([meta.grade && `Grade ${meta.grade}`, meta.year && `Admission for ${meta.year}`].filter(Boolean).join(' '));
+  // how far the family has got ("Required questions unanswered or incomplete", "Submitted", "Sent to the 1 required delegate")
+  $('application-form-item a span, application-form-item a small').each((_, x) => {
+    if ($(x).children().length === 0 && /unanswered|incomplete|ready to submit|submitted|sent to|completed|answered|progress/i.test($(x).text())) $(x).remove();
+  });
+  $('.text-success').remove();
+  // every attribute goes except the ones that give the page its structure
+  $('*').each((_, el) => { for (const a of Object.keys(el.attribs || {})) if (a !== 'id' && a !== 'class') $(el).removeAttr(a); });
+  const body = $('body').html() || '';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ravenna: ${meta.school ? meta.school.replace(/[<>&]/g, ' ') + ' application' : 'application'}</title></head><body>${body}</body></html>`;
+}
+
 /**
  * One saved page → answers. `source` is 'ravenna' | 'niche' | 'psr' | 'bsr'. A labelled fact always beats a rule's guess for the same field.
  */
 function readSavedPage(rec, source, school, now = new Date()) {
+  if (source === 'ravenna') {
+    const rv = readRavenna(rec);
+    if (rv) return { fields: rv.fields, pairs: rv.pairs, meta: rv.meta };
+  }
   const facts = readFacts(rec, source, school);
   const fields = { ...facts.fields };
-  if (source === 'ravenna') {
+  if (source === 'ravenna') {          // a Ravenna page without application steps (another kind of page): read it like any application text
     let rules = {};
     try { rules = readApplicationText(rec, school, now); } catch { /* the labelled facts are still used */ }
     for (const [k, v] of Object.entries(rules)) if (!fields[k]) fields[k] = v;
@@ -340,4 +495,4 @@ function readSavedPage(rec, source, school, now = new Date()) {
   return { fields, pairs: facts.pairs };
 }
 
-module.exports = { readSavedPage, readFacts, RAVENNA_RULE_FIELDS, parseHtml };
+module.exports = { readSavedPage, readFacts, readRavenna, sanitizeRavenna, ravennaMeta, GRADE_BAND, RAVENNA_RULE_FIELDS, parseHtml };

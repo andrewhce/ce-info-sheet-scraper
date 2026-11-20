@@ -155,7 +155,134 @@ const nichePage = () => bytes('Example Hill School Reviews, Rankings | Niche', n
     assert.deepStrictEqual(sources.list(school, 'niche').pages, [], 'nothing is kept when a file is refused');
   });
 
-  await check('Ravenna pages are accepted without a trace of the site, with a warning; the same page twice is refused', async () => {
+  // A page laid out like a saved Ravenna application (checked on three real ones): the school, the grade and year, the school's own steps,
+  // plus the family's details and sign-in tokens, the hidden interface text, and messages from the school, none of which may be kept.
+  const rStep = (id, name, { due = '', desc = '', forms = [], event = false } = {}) => `<div class="application-step border rounded" id="step-${id}"><div class="application-step-header"><button type="button" class="btn-expand"><i class="fa"></i></button> ${name} <small class="text-muted-secondary"${due ? '' : ' hidden=""'}> Due: ${due} </small></div><div class="application-step-body collapse show"><div class="application-step-notes" hidden=""> </div><div>${desc ? `<p>${desc}</p>` : ''}</div>${forms.length ? `<div><div class="application-step-item-list">${forms.map((f) => `<application-form-item><a><div class="icon-container"><i class="fa"></i></div> ${f.name} <i class="flag" hidden=""></i><br><span style="color: #888;"><span> Required questions unanswered or incomplete </span><span class="text-success" hidden=""> Submitted </span></span><span><span><span style="color: #888;"${f.delegates ? '' : ' hidden=""'}><span> Requires ${f.delegates || '0 delegates'} </span></span><span class="text-success" hidden=""> Sent to the 1 required delegate </span></span></span><small class="text-muted-secondary"> Due: ${f.due} </small></a></application-form-item>`).join('')}</div></div>` : ''}${event ? '<div><em hidden="">No events available at this time.</em><div class="application-step-item-list"><a><div class="icon-container event"><i class="fa"></i></div> Register for an event <i class="material-icons">arrow_forward</i></a></div></div>' : ''}<div hidden=""><em>Please check back later for your interview link.</em></div></div></div>`;
+  const rDivider = (name, due) => `<div class="application-step border rounded application-step-divider clearfix"><div class="pull-left"><div><div class="heading"> ${name} </div><small class="text-muted-secondary"> ${due} </small></div></div></div>`;
+  const ravennaPage = ({ schoolName = 'Example Hill School', grade = 'K', year = '2027-2028', url = 'https://www.ravenna-hub.com/students/100001/applications/200001' } = {}) => Buffer.from(`<!DOCTYPE html>
+<!-- saved from url=(0065)${url} -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta name="csrf-token" content="CSRFSECRET"><title>Ravenna</title>
+<script>window.hub={"token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SECRETTOKEN"};</script></head><body>
+<nav class="navbar" id="main-navbar"><ul><li><a class="dropdown-toggle">Zelda <span class="caret"></span></a></li></ul></nav>
+<div id="page-content"><hub-app token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SECRETTOKEN" year="2026-2027"></hub-app></div>
+<div id="main-container" class="container-lg"><student-application student="{&quot;name_first&quot;:&quot;Avery&quot;,&quot;name_last&quot;:&quot;Placeholder&quot;,&quot;birthdate&quot;:&quot;2021-02-10&quot;,&quot;email&quot;:&quot;family@example.com&quot;,&quot;photo_url&quot;:&quot;https://bucket.s3.amazonaws.com/p?X-Amz-Signature=SIG&quot;}" application-id="200001">
+<div id="application-header" style="background: url(https://bucket.s3.amazonaws.com/school_photos/1) cover"><div class="application-container"><div id="application-card"><div class="clearfix"><div class="logo"><img src="https://bucket.s3.amazonaws.com/logo"></div><div><h4 id="application-card-school-name"> ${schoolName} </h4><p> Avery Placeholder • Grade ${grade} <br><span>Admission for</span><span hidden="">Summer of</span> ${year} </p></div></div></div></div></div>
+<div><student-application-applying><div id="application-body"><div class="application-container"><div id="application-content"><div>
+${rDivider('Preliminary Application Steps', 'Forms due by Jan 30th 2027 3:00 pm')}
+${rStep(1, 'Welcome!', { desc: 'Thank you for your interest in Example Hill School.', event: true })}
+${rStep(2, 'Register for Open House', { desc: 'Join us for our school-wide Open House. Everyone is welcome.', event: true })}
+${rStep(3, 'Complete Application Form and Submit Application Fee', { due: 'Jan 30th 2027 3:00 pm', desc: 'After clicking submit, you will be asked to pay the $60.00 application fee by credit card.', forms: [{ name: 'Application for Admission', due: 'Jan 30th 2027 3:00 pm' }] })}
+<div hidden=""><div class="heading"> Preliminary Application is ready to submit </div></div></div><div>
+${rDivider('Additional Steps', 'Forms due by Jan 23rd 2027 5:00 am')}
+${rStep(4, 'Request and Submit Teacher Recommendation Form', { desc: 'Please invite their teacher to submit the recommendation form as early as possible.', forms: [{ name: 'Common Confidential Student Evaluation Form (Pre-School - 1st Grade Applicants)', delegates: 'one delegate', due: 'Jan 23rd 2027 5:00 am' }] })}
+${rStep(5, 'Testing', { desc: 'Example Hill does not require standardized tests. Scores are not added to applicants’ files.' })}
+${rStep(6, 'Timed Writing Sample', { due: 'Jan 23rd 2027 5:00 am', desc: 'Applicants complete a timed writing sample, about 20 minutes.' })}
+${rStep(7, 'Schedule Assessment', { desc: 'After your application arrives our Admissions Director will arrange a Shadow Day for your child.' })}
+${rStep(8, 'Transcript Release', { desc: 'Please send the release form to your child’s current school.', forms: [{ name: 'Transcript Release and Confidentiality', delegates: '2 delegates', due: 'Feb 1st 2027 4:00 pm' }, { name: 'Transcript Release and Confidentiality (print)', due: 'Feb 1st 2027 4:00 pm' }] })}
+${rStep(9, 'Admissions Decisions', { due: 'Feb 27th 2027 5:00 am', desc: 'On Friday, February 26 at 4:00 pm, admissions decisions will be posted on Ravenna. Making these decisions is more art than science.' })}
+</div></div><div id="application-sidebar"><div class="card"><div class="card-header"><h4 class="card-title">Messages</h4></div><div><div style="padding: 15px;">Message from admissions: Hello Placeholder family, your tour is booked.</div></div></div></div></div></div></student-application-applying></div></student-application></div>
+<div id="footer"><div class="container">© 2026 Ravenna Solutions | Ravenna is an online application system for students applying to private and independent PS-12 schools.</div></div>
+<script src="./Ravenna_files/embed.js" data-ft-email="family@example.com" data-ft-first-name="Zelda" data-ft-last-name="Placeholder"></script></body></html>`);
+  const PII = ['Avery Placeholder', 'Placeholder', 'family@example.com', 'eyJ0eXAi', 'SECRETTOKEN', 'CSRFSECRET', 'Zelda', '2021-02-10', 'amazonaws', 'X-Amz', 'Hello Placeholder', 'tour is booked'];
+  const ravennaDir = (s) => path.join(PATHS.data, 'source-pages', s.id, 'ravenna');
+
+  await check('a saved Ravenna application: the school’s steps become its Admissions Portal answers, and the family’s details are never kept', async () => {
+    const e = await sources.addFile({ school, source: 'ravenna', name: 'Ravenna.html', bytes: ravennaPage() });
+    assert.strictEqual(e.title, 'Example Hill School application');
+    assert.strictEqual(e.url, 'https://www.ravenna-hub.com/students/100001/applications/200001', 'the page’s own address comes from the “saved from” note');
+    assert.strictEqual(e.warning, undefined);
+    // nothing personal reaches the disk
+    const kept = fs.readdirSync(ravennaDir(school)).filter((f) => f.endsWith('.html')).map((f) => fs.readFileSync(path.join(ravennaDir(school), f), 'utf8')).join('\n');
+    for (const needle of PII) assert.ok(!kept.includes(needle), `the saved copy still holds “${needle}”`);
+    assert.ok(kept.includes('Example Hill School') && kept.includes('Register for Open House') && kept.includes('Grade K'), 'the school’s own content is kept');
+    // the answers: the website answered "application" and left "timeline" empty
+    const file = path.join(PATHS.resultsDir, school.id + '.json');
+    const siteApp = { status: 'found', value: 'The website’s own steps', confidence: 'high', sources: [{ url: 'https://www.examplehill.org/apply', title: 'Apply' }], snippet: 'x' };
+    writeJson(file, { id: school.id, name: school.name, status: 'ok', scrapedAt: '2026-11-01T00:00:00Z', start: school.website, counts: { found: 1, none: 3, manual: 0 }, pages: [], fields: { application: siteApp, timeline: { status: 'none' }, interviews: { status: 'none' }, ratio: { status: 'none' } } });
+    const out = await sources.reapply(school, NOW);
+    const r = readJson(file);
+    assert.strictEqual(r.fields.application.value, 'The website’s own steps', 'the website’s answer stays in its own column');
+    assert.strictEqual(r.fields.timeline.status, 'none', 'Ravenna is not a fallback: the website column is not filled from it');
+    const p = r.portalFields;
+    assert.deepStrictEqual(Object.keys(p).sort(), ['application', 'decisionDate', 'guideEvents', 'interviews', 'pws', 'recommendations', 'testingPolicy', 'timeline', 'transcripts']);
+    assert.ok(Object.values(p).every((f) => f.status === 'found' && f.source.key === 'ravenna' && f.source.column === 'B' && f.snippet && f.sources[0].url === e.url), 'each carries its evidence and its column');
+    assert.deepStrictEqual(p.application.value.split('\n'), [
+      'Admission for 2027-2028, Grade K',
+      'Preliminary Application Steps (forms due Jan 30th 2027 3:00 pm)',
+      '1. Register for Open House',
+      '2. Complete Application Form and Submit Application Fee (due Jan 30th 2027 3:00 pm)',
+      'Additional Steps (forms due Jan 23rd 2027 5:00 am)',
+      '3. Request and Submit Teacher Recommendation Form',
+      '4. Testing',
+      '5. Timed Writing Sample (due Jan 23rd 2027 5:00 am)',
+      '6. Schedule Assessment',
+      '7. Transcript Release',
+      '8. Admissions Decisions (due Feb 27th 2027 5:00 am)',
+      'Application fee: $60.00',
+    ], 'the steps in order under the page’s own section names; a “Welcome” greeting is not a step');
+    assert.deepStrictEqual(p.timeline.value.split('\n'), [
+      'Preliminary Application Steps: forms due Jan 30th 2027 3:00 pm',
+      'Complete Application Form and Submit Application Fee: due Jan 30th 2027 3:00 pm',
+      'Additional Steps: forms due Jan 23rd 2027 5:00 am',
+      'Common Confidential Student Evaluation Form (Pre-School - 1st Grade Applicants): due Jan 23rd 2027 5:00 am',
+      'Timed Writing Sample: due Jan 23rd 2027 5:00 am',
+      'Transcript Release and Confidentiality: due Feb 1st 2027 4:00 pm',
+      'Transcript Release and Confidentiality (print): due Feb 1st 2027 4:00 pm',
+      'Admissions Decisions: due Feb 27th 2027 5:00 am',
+    ], 'each section’s “forms due by” and each step’s and form’s own due date, in page order (a form due when its step is is not repeated)');
+    assert.match(p.recommendations.value, /^Request and Submit Teacher Recommendation Form: Please invite their teacher/);
+    assert.match(p.recommendations.value, /- Common Confidential Student Evaluation Form \(Pre-School - 1st Grade Applicants\) \(requires one delegate; due Jan 23rd 2027 5:00 am\)/);
+    assert.match(p.transcripts.value, /\(requires 2 delegates; due Feb 1st 2027 4:00 pm\)/);
+    assert.match(p.transcripts.value, /- Transcript Release and Confidentiality \(print\) \(due Feb 1st 2027 4:00 pm\)/);
+    assert.ok(!/requires 0|0 delegates/.test(p.transcripts.value), 'a form that needs no delegate does not say it needs 0: that label is hidden on the page');
+    assert.match(p.testingPolicy.value, /^Testing: Example Hill does not require standardized tests\./);
+    assert.match(p.pws.value, /^Timed Writing Sample: Applicants complete a timed writing sample/);
+    assert.match(p.interviews.value, /^Schedule Assessment: .*Shadow Day/);
+    assert.ok(!/Timed Writing/.test(p.interviews.value), 'a writing sample is not an interview');
+    assert.deepStrictEqual(p.guideEvents.value.split('\n').map((l) => l.split(':')[0]), ['Register for Open House'], 'events are the steps with a “Register for an event” link; “Welcome” is not one');
+    assert.strictEqual(p.decisionDate.value, 'On Friday, February 26 at 4:00 pm, admissions decisions will be posted on Ravenna.');
+    for (const f of Object.values(p)) assert.ok(!/ready to submit|check back later|No events available/i.test(f.value), 'hidden interface text is never an answer: ' + f.value.slice(0, 60));
+    // a question counts as answered when any source answered it
+    assert.strictEqual(r.counts.found, 9, 'the website’s application row and the eight portal-only rows: a question counts once');
+    assert.ok(out.filled.ravenna.length === 9);
+    assert.ok(r.otherSources.ravenna.filled.length === 9 && r.websiteFields.application.value === 'The website’s own steps');
+    // taking the page away takes the answers away
+    sources.remove(school, 'ravenna', sources.list(school, 'ravenna').pages[0].id);
+    await sources.reapply(school, NOW);
+    const back = readJson(file);
+    assert.strictEqual(back.portalFields, undefined);
+    assert.strictEqual(back.fields.application.value, 'The website’s own steps');
+    assert.strictEqual(fs.readdirSync(ravennaDir(school)).filter((f) => f.endsWith('.html')).length, 0, 'the file is deleted with it');
+  });
+
+  await check('a Ravenna page for another school is refused; a grade-6 application belongs to the middle school; a blocked website still shows the portal answers', async () => {
+    await assert.rejects(sources.addFile({ school, source: 'ravenna', name: 'b.html', bytes: ravennaPage({ schoolName: 'Belmont Oaks Academy' }) }), /application to “Belmont Oaks Academy”, which does not look like Example Hill School/);
+    const casti = ravennaPage({ schoolName: 'Castilleja School', grade: '6', url: 'https://www.ravenna-hub.com/students/100002/applications/200002' });
+    const upper = { id: 'castilleja-upper', name: 'Castilleja (Upper) School', division: 'upper', website: null };
+    const middle = { id: 'castilleja-middle', name: 'Castilleja (Middle) School', division: 'middle', website: null };
+    const warn = await sources.addFile({ school: upper, source: 'ravenna', name: 'c.html', bytes: casti });
+    assert.match(warn.warning, /application for Grade 6 \(the middle school\), but Castilleja \(Upper\) School is the upper school/);
+    assert.strictEqual(sources.matchSchool({ name: 'Castilleja.html', bytes: casti }, [upper, middle]).school.id, 'castilleja-middle', 'the grade says which division');
+    const k5 = ravennaPage({ schoolName: 'Castilleja School', grade: '10' });
+    assert.strictEqual(sources.matchSchool({ name: 'x.html', bytes: k5 }, [upper, middle]).school.id, 'castilleja-upper');
+    assert.strictEqual(sources.matchSchool({ name: 'Belmont.html', bytes: ravennaPage({ schoolName: 'Belmont Oaks Academy' }) }, [school, upper]).candidates.length, 0, 'a school that is not in the list is not guessed');
+    // a school whose website cannot be read: the portal answers still show, and it goes back to blocked when they are removed
+    const blocked = { id: 'blocked-ravenna', name: 'Example Hill Annex', division: null, website: 'https://annex.example.org/' };
+    const bf = path.join(PATHS.resultsDir, blocked.id + '.json');
+    writeJson(bf, { id: blocked.id, name: blocked.name, status: 'blocked', detail: 'site refused automated access (HTTP 403)', pages: [], fields: {} });
+    const e = await sources.addFile({ school: blocked, source: 'ravenna', name: 'r.html', bytes: ravennaPage({ schoolName: 'Example Hill Annex', url: 'https://www.ravenna-hub.com/students/100001/applications/200003' }) });
+    await sources.reapply(blocked, NOW);
+    const r = readJson(bf);
+    assert.deepStrictEqual([r.status, r.source, r.websiteStatus.status], ['ok', 'other-sources', 'blocked']);
+    assert.ok(r.portalFields.application && r.counts.found === 9, 'portal rows count as answered');
+    assert.ok(Object.values(r.fields).every((f) => f.status !== 'found'), 'the website column stays empty: nothing is moved into it');
+    sources.remove(blocked, 'ravenna', e.id);
+    await sources.reapply(blocked, NOW);
+    assert.deepStrictEqual([readJson(bf).status, readJson(bf).portalFields], ['blocked', undefined]);
+    sources.remove(upper, 'ravenna', warn.id);
+  });
+
+  await check('a Ravenna page that is not an application, or does not name its school, is kept with a warning', async () => {
     const page = bytes('Example Hill School Application', '', '<h2>Application deadline</h2><p>Applications are due January 10, 2027.</p>');
     const e = await sources.addFile({ school, source: 'ravenna', name: 'ravenna application.html', bytes: page });
     assert.match(e.warning, /Nothing on this page says it comes from Ravenna/);

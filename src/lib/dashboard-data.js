@@ -158,7 +158,9 @@ function compareSchool(id, tabIndex = 0, opts) {
       key: row.key, field: scraped, pages: result.pages, identityBad, prior: priors.get(row.key),   // the sheet is not an input: it can be old or wrong
     }) : null;
     if (t) trustCounts[t.triage]++;
-    rows.push(t ? { ...row, sheet: cells, scraped, verdict, trust: t } : { ...row, sheet: cells, scraped, verdict });
+    // the admissions portal's (Ravenna) answer for the same question, kept apart from the website's: the sheet has a column for each
+    const portal = result && result.portalFields && result.portalFields[row.key] || null;
+    rows.push(t ? { ...row, sheet: cells, scraped, portal, verdict, trust: t } : { ...row, sheet: cells, scraped, portal, verdict });
   }
   const out = { rows, counts, trustCounts, tab };
   cmpCache.set(key, out);

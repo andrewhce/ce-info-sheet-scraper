@@ -188,10 +188,13 @@ function createTools(deps) {
         const sc = row.scraped;
         const found = sc && sc.status === 'found';
         const sheet = sheetOf(row, wanted.length ? sz.focusValue : sz.cell);
-        if (!wanted.length && !found && !sheet) { noData.push(row.label.replace(/:$/, '')); continue; }
+        const portal = row.portal && row.portal.status === 'found';
+        if (!wanted.length && !found && !sheet && !portal) { noData.push(row.label.replace(/:$/, '')); continue; }
         fields.push({
           key: row.key, label: row.label.replace(/:$/, ''), verdict: row.verdict,
           website: found ? websiteOf(sc, wanted.length ? sz.focusQuote : sz.quote, wanted.length ? sz.focusValue : sz.value) : sc && sc.status === 'manual' ? 'not looked up on websites' : null,
+          // the admissions portal's (Ravenna) steps for the same question: the sheet's "Admissions Portal" column, kept apart from the website's
+          admissions_portal_ravenna: portal ? websiteOf(row.portal, wanted.length ? sz.focusQuote : sz.quote, wanted.length ? sz.focusValue : sz.value) : undefined,
           sheet: sheet || null,
         });
       }

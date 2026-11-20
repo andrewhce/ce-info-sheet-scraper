@@ -1,14 +1,17 @@
 'use strict';
-// Where an answer comes from, in this order:
+// Where an answer comes from:
 //   1. the school's own website (read automatically, or from pages a person saved: lib/manual-pages.js)
-//   2. Ravenna, the school's own application platform
-//   3. Niche
-//   4. Private School Review and Boarding School Review
-// A later source only fills a question that the earlier ones left empty, and every answer says which site it came from.
+//   2. Niche: only for a question the website left empty
+//   3. Private School Review and Boarding School Review: only for a question both of those left empty
+//   Ravenna (the school's own application platform) is not a fallback. Its steps, forms and dates are the "Admissions Portal" answers,
+//   which the sheet keeps in their own column (B) of the Guide to Applying rows, next to the website's column (C): they are kept
+//   separately in the result (`portalFields`), never in place of the website's answer.
+// Every answer says which site it came from.
 //
-// Ravenna, Niche and the two review sites are never read automatically: Niche blocks automatic readers, and Private School
-// Review's terms forbid automated access. A person opens the school's page in their own browser, saves it (Ctrl + S), and
-// adds the file here. The dashboard then reads the saved file and never contacts those sites.
+// Ravenna, Niche and the two review sites are never read automatically: Niche blocks automatic readers, Private School
+// Review's terms forbid automated access, and Ravenna needs a login. A person opens the school's page in their own browser,
+// saves it (Ctrl + S), and adds the file here. The dashboard then reads the saved file and never contacts those sites.
+// A saved Ravenna page is a family's application, so it is cleaned before it is kept: see source-readers.js (sanitizeRavenna).
 //
 // Saved files live in data/source-pages/<school id>/<source>/ (one folder per school and source).
 const crypto = require('crypto');
@@ -18,7 +21,7 @@ const { PATHS, readJson, writeJson, slug, clip } = require('./util');
 const { parseHtml, parsePdfText, PARSER_VERSION } = require('./html');
 const { decode, addressInHtml } = require('./manual-pages');
 const { BLOCK_MARKERS } = require('./fetcher');
-const { readSavedPage } = require('./source-readers');
+const { readSavedPage, sanitizeRavenna, ravennaMeta, GRADE_BAND } = require('./source-readers');
 const { siteIdentity, nameWords } = require('./identity');
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
@@ -28,16 +31,17 @@ const MIN_TEXT = 150;
 class SourcePagesError extends Error { constructor(m, status) { super(m); this.status = status || 422; } }
 
 const SOURCES = {
-  ravenna: { key: 'ravenna', label: 'Ravenna', rank: 2, host: /(^|\.)ravenna-hub\.com$/i, mention: /ravenna/i,
-    blurb: 'The school’s own application platform (Ravenna Hub). Fills application steps, dates and requirements the website does not show.' },
-  niche: { key: 'niche', label: 'Niche', rank: 3, host: /(^|\.)niche\.com$/i, mention: /niche\.com/i,
+  ravenna: { key: 'ravenna', label: 'Ravenna', rank: null, column: 'B', host: /(^|\.)ravenna-hub\.com$/i, mention: /ravenna/i,
+    blurb: 'The school’s own application platform (Ravenna Hub). Its steps, forms and due dates fill the “Admissions Portal” column of the Guide to Applying rows, next to the website’s answers.' },
+  niche: { key: 'niche', label: 'Niche', rank: 2, host: /(^|\.)niche\.com$/i, mention: /niche\.com/i,
     blurb: 'Second choice for facts the school’s website does not give, such as the student-teacher ratio or class size.' },
-  psr: { key: 'psr', label: 'Private School Review', rank: 4, host: /(^|\.)privateschoolreview\.com$/i, mention: /privateschoolreview\.com/i,
+  psr: { key: 'psr', label: 'Private School Review', rank: 3, host: /(^|\.)privateschoolreview\.com$/i, mention: /privateschoolreview\.com/i,
     blurb: 'Third choice, after Niche. Day schools.' },
-  bsr: { key: 'bsr', label: 'Boarding School Review', rank: 4, host: /(^|\.)boardingschoolreview\.com$/i, mention: /boardingschoolreview\.com/i,
+  bsr: { key: 'bsr', label: 'Boarding School Review', rank: 3, host: /(^|\.)boardingschoolreview\.com$/i, mention: /boardingschoolreview\.com/i,
     blurb: 'Third choice, after Niche. Boarding schools.' },
 };
-const ORDER = ['ravenna', 'niche', 'psr', 'bsr'];
+const ORDER = ['ravenna', 'niche', 'psr', 'bsr'];     // the order the sources are shown in
+const FILL_ORDER = ['niche', 'psr', 'bsr'];          // the order they fill what the website left empty (Ravenna keeps its own column)
 const isSource = (k) => Object.prototype.hasOwnProperty.call(SOURCES, k);
 
 // ------------------------------------------------------------------------------------------- where things live ---
@@ -132,20 +136,37 @@ async function addFile({ school, source, name, bytes, url }) {
     if (source === 'ravenna') warning = 'Nothing on this page says it comes from Ravenna. Check that you saved the right page.';
     else throw new SourcePagesError(`This does not look like a ${src.label} page. Open the school’s page on ${src.label}, wait until it has loaded, and save that.`);
   }
-  // is it about this school? Review pages always name the school in the title, so a different school is refused; an application page may not
-  const id = siteIdentity({ name: school.name }, [rec]);
-  if (!id.ok) {
-    const what = clip(rec.title || cleanName, 90);
-    if (source === 'ravenna') warning = warning || `The school’s name (${id.checked.slice(0, 3).join(', ')}) does not appear on this page. Check that it is ${school.name}’s page.`;
-    else throw new SourcePagesError(`This page is “${what}”, which does not look like ${school.name}. Open the right school’s page, or add the file under the right school.`);
+  // is it about this school? Review pages always name the school in the title, so a different school is refused. A Ravenna page is titled
+  // just "Ravenna": the school's name is on the page itself, so that is what is checked (and a page without it only gets a warning).
+  let stored = bytes, title = rec.title || '';
+  if (source === 'ravenna' && kind === 'html') {
+    const rv = ravennaMeta(rec._html);
+    if (rv) {
+      title = `${rv.school} application`;
+      if (!siteIdentity({ name: school.name }, [{ title: rv.school, blocks: [], jsonld: [] }]).ok) {
+        throw new SourcePagesError(`This Ravenna page is the application to “${rv.school}”, which does not look like ${school.name}. Add it under the right school.`);
+      }
+      // the application is for one grade: a Grade 6 page belongs to the middle school, not the upper school
+      const band = GRADE_BAND(rv.grade);
+      if (school.division && band && band !== school.division) warning = warning || `This is the application for Grade ${rv.grade} (the ${band} school), but ${school.name} is the ${school.division} school. Check that it is the right page.`;
+    } else if (!siteIdentity({ name: school.name }, [rec]).ok) {
+      warning = warning || `This page does not show the name of the school it is the application to. Check that it is ${school.name}’s page.`;
+    }
+    stored = Buffer.from(sanitizeRavenna(rec._html), 'utf8');       // the family's details are never kept
+  } else {
+    const id = siteIdentity({ name: school.name }, [rec]);
+    if (!id.ok) {
+      const what = clip(rec.title || cleanName, 90);
+      throw new SourcePagesError(`This page is “${what}”, which does not look like ${school.name}. Open the right school’s page, or add the file under the right school.`);
+    }
   }
   if (finalUrl && list.some((e) => e.url === finalUrl)) throw new SourcePagesError('A page with that web address is already saved. Remove it first if you want to replace it.');
 
   const entryId = crypto.randomBytes(5).toString('hex');
   const file = `${entryId}.${kind}`;
   fs.mkdirSync(dirFor(school, source), { recursive: true });
-  fs.writeFileSync(path.join(dirFor(school, source), file), bytes);
-  const entry = { id: entryId, file, name: cleanName, url: finalUrl || null, title: clip(String(rec.title || ''), 160), kind, bytes: bytes.length, chars, hash, addedAt: savedAt, warning: warning || undefined };
+  fs.writeFileSync(path.join(dirFor(school, source), file), stored);
+  const entry = { id: entryId, file, name: cleanName, url: finalUrl || null, title: clip(String(title), 160), kind, bytes: stored.length, chars, hash, addedAt: savedAt, warning: warning || undefined };
   list.push(entry);
   saveIndex(school, source, list);
   return publicEntry(entry);
@@ -183,7 +204,8 @@ function matchSchool({ name, bytes }, schools) {
   const lead = (t) => String(t || '').split(/\s+[-–—|]\s+|\s*\(|,|\s+reviews?\b|\s+rankings?\b|\s+profile\b|\s+niche\b/i)[0];
   const fileStem = lead(String(name || '').replace(/\.[a-z0-9]+$/i, '').replace(/\b(niche|ravenna|psr|bsr|private school review|boarding school review|saved|page|copy)\b/gi, ' '));
   const jsonName = (rec.jsonld || []).filter((n) => n && /School|Organization/i.test([].concat(n['@type'] || []).join(' '))).map((n) => n.name);
-  const hay = [lead(rec.title), lead((rec.blocks.find((b) => b.k === 'h' && b.level === 1) || {}).text), ...jsonName.map(lead), fileStem]
+  const rv = ravennaMeta(html);          // a Ravenna application names its school, and the grade applied for, on the page
+  const hay = [lead(rec.title), lead((rec.blocks.find((b) => b.k === 'h' && b.level === 1) || {}).text), ...jsonName.map(lead), fileStem, rv && rv.school]
     .filter(Boolean).join(' \n ').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '');
   const squashed = hay.replace(/[^a-z0-9]/g, '');
   const scored = [];
@@ -202,6 +224,10 @@ function matchSchool({ name, bytes }, schools) {
   scored.sort((a, b) => b.score - a.score);
   const top = scored.filter((x) => x.score === scored[0].score);
   if (top.length === 1) return { school: top[0].s };
+  // two divisions of one school fit: the grade a Ravenna application is for says which ("Grade 6" is the middle school)
+  const band = rv && GRADE_BAND(rv.grade);
+  const byBand = band ? top.filter((x) => x.s.division === band) : [];
+  if (byBand.length === 1) return { school: byBand[0].s };
   return { candidates: top.slice(0, 6).map((x) => x.s) };
 }
 
@@ -271,7 +297,7 @@ async function reapply(school, now = new Date()) {
     if (restored.source === 'other-sources') delete restored.source;
     restored.pages = (prev.pages || []).filter((p) => !p.fromSource);
     restored.counts = summarize(restored.fields);
-    for (const k of ['websiteFields', 'websiteStatus', 'otherSources']) delete restored[k];
+    for (const k of ['websiteFields', 'websiteStatus', 'otherSources', 'portalFields']) delete restored[k];
     if (restored.status === 'not-scraped') { fs.rmSync(file, { force: true }); return null; }
     writeJson(file, restored);
     return null;
@@ -287,17 +313,24 @@ async function reapply(school, now = new Date()) {
 
   const merged = websiteOk ? clone(websiteFields) : blankFields();     // a website that could not be read has no answers of its own
   const filled = {};
-  const allKeys = new Set([...Object.keys(merged), ...keys.flatMap((k) => Object.keys(per[k].fields))]);
+  // Niche, then the review sites, fill only what is still empty
+  const allKeys = new Set([...Object.keys(merged), ...FILL_ORDER.flatMap((k) => (per[k] ? Object.keys(per[k].fields) : []))]);
   for (const key of allKeys) {
     const have = merged[key];
     if (have && (have.status === 'found' || have.status === 'manual')) continue;
-    for (const sk of ORDER) {
+    for (const sk of FILL_ORDER) {
       const f = per[sk] && per[sk].fields[key];
       if (!f) continue;
       merged[key] = decorate(f, SOURCES[sk]);
       (filled[sk] = filled[sk] || []).push(key);
       break;
     }
+  }
+  // Ravenna's steps are the "Admissions Portal" answers: always kept, in their own column, whatever the website said
+  const portalFields = {};
+  if (per.ravenna) {
+    for (const [key, f] of Object.entries(per.ravenna.fields)) portalFields[key] = { ...f, source: { key: 'ravenna', label: 'Ravenna', column: 'B' } };
+    filled.ravenna = Object.keys(portalFields);
   }
   const pages = (result.pages || []).filter((p) => !p.fromSource);
   for (const sk of keys) {
@@ -312,11 +345,14 @@ async function reapply(school, now = new Date()) {
       facts: Object.keys(per[sk].fields).length, filled: filled[sk] || [],
     };
   }
+  // a question counts as answered when the website, Niche, a review site or the admissions portal answered it
+  const counts = summarize(Object.fromEntries([...new Set([...Object.keys(merged), ...Object.keys(portalFields)])].map((k) => [k, merged[k] && merged[k].status === 'found' ? merged[k] : portalFields[k] || merged[k]])));
   const out = {
-    ...result, fields: merged, counts: summarize(merged), pages, websiteFields, websiteStatus, otherSources,
+    ...result, fields: merged, counts, pages, websiteFields, websiteStatus, otherSources,
     status: 'ok', detail: null,
     ...(websiteStatus.status === 'ok' ? {} : { source: 'other-sources', scrapedAt: stamp }),
   };
+  if (Object.keys(portalFields).length) out.portalFields = portalFields; else delete out.portalFields;
   if (websiteStatus.status === 'ok' && out.source === 'other-sources') delete out.source;
   writeJson(file, out);
   return { filled, counts: out.counts, otherSources };

@@ -489,3 +489,6 @@ a.bookmarklet { display: inline-block; cursor: grab; text-decoration: none; marg
 .receivebox select, .receivebox input[type=search] { width: 100%; margin: 6px 0; padding: 6px 10px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); }
 .receivebox .good { color: var(--ok); }
 .receivebox .bad { color: var(--bad); }
+/* the admissions portal's (Ravenna) answer under the website's */
+.portalblock { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--info); background: var(--mute-bg); border-radius: 0 8px 8px 0; }
+.portalblock .chip { margin-bottom: 6px; }

@@ -126,7 +126,14 @@ function collectFindingRows(schools, { single = false, tabIndex = 0 } = {}) {
       if (r.kind !== 'field') continue;
       const sc = r.scraped;
       const hasFound = sc && sc.status === 'found';
-      if (!single && !hasFound && r.verdict !== 'differs' && r.verdict !== 'fills') continue;
+      // the admissions portal's (Ravenna) answer is its own line, next to the website's: the sheet keeps them in two columns
+      const portalRow = r.portal && r.portal.status === 'found' ? {
+        school: p.school.name, tier: p.school.tier == null ? '' : p.school.tier, section: r.section || '',
+        label: `${r.label.replace(/:$/, '')} (Admissions Portal: Ravenna)`, sheetVal: '',
+        webVal: r.portal.value, verdict: 'portal', verdictText: 'From the admissions portal (Ravenna)', confidence: CONF_TEXT[r.portal.confidence] || r.portal.confidence || '',
+        sourceUrl: firstSource(r.portal), quote: r.portal.snippet || '', note: r.portal.note || '',
+      } : null;
+      if (!single && !hasFound && r.verdict !== 'differs' && r.verdict !== 'fills') { if (portalRow) rows.push(portalRow); continue; }
       const src = firstSource(sc);
       rows.push({
         school: p.school.name,
@@ -143,6 +150,7 @@ function collectFindingRows(schools, { single = false, tabIndex = 0 } = {}) {
         quote: hasFound && sc.snippet ? sc.snippet : '',
         note: hasFound ? [sc.note, r.trust && r.trust.triage !== 'ready' ? 'Why it needs a look: ' + topReasons(r.trust, 2).join('; ') + '.' : ''].filter(Boolean).join(' ') : '',
       });
+      if (portalRow) rows.push(portalRow);
     }
   }
   return rows;

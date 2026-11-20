@@ -39,6 +39,7 @@ var NOTE_MARK = '[School Info export]';
 
 // Which column of a school tab each template row is written to: column B for the school facts and the
 // Events rows, column C ("School Website") for the Guide to Applying rows and the Facts Sheet links.
+// The admissions portal's (Ravenna) answers say column B themselves (column B of those rows is "Admissions Portal").
 var COLUMN_C_KEYS = {
   factsSheet: 1, mission: 1, portal: 1, timeline: 1, application: 1, recommendations: 1, transcripts: 1,
   testingPolicy: 1, interviews: 1, pws: 1, essays: 1, guideEvents: 1, decisionDate: 1
@@ -432,8 +433,12 @@ function exportSchool_(body) {
     var f = fields[i];
     var row = Object.prototype.hasOwnProperty.call(loc.rows, f.key) ? loc.rows[f.key] : 0;
     if (!row || row > span) { counts.noRow++; rowsOut.push({ key: f.key, label: f.label, result: 'no-row' }); continue; }
-    var colNum = COLUMN_C_KEYS[f.key] ? 3 : 2;
+    // an answer can name its column: the admissions portal's (Ravenna) answers go in column B of the Guide to Applying rows, next to the
+    // website's column C. Otherwise the row decides.
+    var colNum = f.column === 'B' ? 2 : f.column === 'C' ? 3 : (COLUMN_C_KEYS[f.key] ? 3 : 2);
     var letter = colNum === 3 ? 'C' : 'B';
+    // where the answer came from: the website unless the answer says otherwise (Niche, a review site, the admissions portal)
+    var from = f.origin ? String(f.origin) : 'website';
     var cell = sheet.getRange(row, colNum);
     var existing = String(shown[row - 1][colNum - 1] || '');
     var hint = hints[f.key] && hints[f.key][letter] ? String(hints[f.key][letter]) : '';
@@ -450,7 +455,7 @@ function exportSchool_(body) {
       // short hints such as "Parent" / "Student" are labels: keep them as the first line
       if (isHint && hint.length <= 12) text = hint + '\n' + value;
       writeValue_(cell, text, !!LINK_KEYS[f.key]);
-      cell.setNote(mergeNote_(oldNote, noteBlock_('FILLED FROM WEBSITE', stamp, f, null)));
+      cell.setNote(mergeNote_(oldNote, noteBlock_('FILLED FROM ' + from.toUpperCase(), stamp, f, null)));
       if (plainBg || isHint) cell.setBackground(CONFIG.FILLED_COLOR);
       counts.filled++;
       rowsOut.push({ key: f.key, label: f.label, result: 'filled' });
@@ -458,7 +463,7 @@ function exportSchool_(body) {
       counts.unchanged++;
       rowsOut.push({ key: f.key, label: f.label, result: 'unchanged' });
     } else {
-      cell.setNote(mergeNote_(oldNote, noteBlock_('UPDATED INFO ON WEBSITE (cell not overwritten)', stamp, f, value)));
+      cell.setNote(mergeNote_(oldNote, noteBlock_('UPDATED INFO ON ' + from.toUpperCase() + ' (cell not overwritten)', stamp, f, value)));
       if (plainBg) cell.setBackground(CONFIG.UPDATE_COLOR);
       counts.flagged++;
       rowsOut.push({ key: f.key, label: f.label, result: 'flagged' });
@@ -531,7 +536,7 @@ function noteBlock_(head, stamp, f, websiteValue) {
   if (websiteValue != null) {
     var v = String(websiteValue);
     if (v.length > CONFIG.MAX_NOTE_CHARS) v = v.slice(0, CONFIG.MAX_NOTE_CHARS) + ' ...';
-    lines.push('', 'Website says:', v);
+    lines.push('', (f.origin ? String(f.origin) : 'Website') + ' says:', v);
   }
   lines.push('', 'Source: ' + (urls.join(', ') || 'see dashboard'), 'Confidence: ' + (f.confidence || 'unknown'));
   if (f.note) lines.push('Note: ' + f.note);
