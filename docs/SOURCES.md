@@ -71,9 +71,33 @@ structured data.
 
 - **Private School Review and Boarding School Review** use one layout. Its facts table was checked against a real page, and
   nothing else on the page is read.
-- **Niche and Ravenna** use a general reader: definition lists, two-column table rows, label and value elements with matching
-  class names, and "Label: value" lines. It is tuned on real saved pages: if a page shows "nothing read" on the Ravenna &
-  reviews page, send that file so the reader can be set up for its layout.
+- **Niche** was checked against a real saved page (AEON School). Niche words things its own way, so the reader maps Niche's
+  words to the template's rows:
+
+  | Niche says | Template row |
+  | --- | --- |
+  | the grades under the school's name ("5-12") | Grades |
+  | the tags under About ("Private", "Online School") | School Type |
+  | "NAIS Member" and similar tags | Partnering Organizations/Groups |
+  | the address block under About | Location |
+  | "Students" | Total Student Enrollment |
+  | "Student-Teacher Ratio" | Student-Teacher Ratio |
+  | "Yearly Tuition" (with the share on aid and the average aid in the note) | Tuition |
+  | "Average SAT", "Average ACT" (user-reported, said in the note) | Average Standardized test scores |
+  | "Application Deadline" | Application Timeline |
+  | "Application Fee" | Application |
+  | "Interview Required" | Interviews |
+  | "Required/Recommended Tests" | Testing Policy |
+  | "From <school>" (the school's own text) | About the School |
+  | "Academics at <school>" (the school's own text) | Academics |
+
+  Niche puts a one-sentence explanation between a label and its value, and its page code marks the whole content area as
+  navigation; both are handled. Niche's own office address (in the page's structured data) is never used as the school's.
+  Answers keep Niche's own words ("Interview Required: Yes"). When a division school (Upper, Middle) is filled from a page about
+  the whole school, the answers carry a note to check that the figure applies to that division.
+- **Ravenna** uses a general reader: definition lists, two-column table rows, label and value elements with matching class
+  names, and "Label: value" lines. It has not been tuned on a real saved page yet: if a page shows "nothing read" on the Ravenna
+  & reviews page, send that file so the reader can be set up for its layout.
 - **Ravenna** pages are also read with the same rules as school websites, but only for application questions (open and decision
   dates, steps, recommendations, transcripts, testing policy, interviews, essays, events, tuition).
 

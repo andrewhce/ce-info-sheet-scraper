@@ -85,6 +85,56 @@ const nichePage = () => bytes('Example Hill School Reviews, Rankings | Niche', n
     assert.strictEqual(f.testScores.value, 'Average SAT score: 1450');
   });
 
+  await check('a real Niche page (checked on a saved AEON page): facts sit under headings with an explanation line before the value, the content area is marked as navigation, and Niche uses its own words', async () => {
+    const expl = (t) => `<p>${t} Please contact the school for more details.</p>`;
+    const niche = `<!doctype html><html><head><meta charset="utf-8"><title>Aeon School - Niche</title><link rel="canonical" href="https://www.niche.com/k12/aeon-school-new-york-ny/">
+<script type="application/ld+json">{"@type":"Organization","name":"Niche","address":{"@type":"PostalAddress","streetAddress":"116 15th St, Suite 302","addressLocality":"Pittsburgh","addressRegion":"PA","postalCode":"15222"}}</script>
+<script type="application/ld+json">{"@type":"School","name":"Aeon School"}</script></head><body>
+<header><nav class="menu"><ul><li>Tuition</li><li>Students</li><li>Best Private Schools</li></ul></nav></header>
+<main><h1>Aeon School</h1><ul><li>grade A+</li><li>5-12</li><li>New York, NY</li><li>Rating 4.75 out of 5</li></ul></main>
+<nav class="page-sections"><ul><li>Applying</li><li>Tuition</li><li>Students</li><li>Teachers</li></ul>
+<h2>About</h2><p>aeonschool.org</p><p>(516) 518-8782</p><p>447 BROADWAY NEW YORK, NY 10013</p>
+<h3>About Aeon School...</h3><ul><li>High School</li><li>Middle School</li><li>NAIS Member</li><li>Online School</li><li>Private</li><li>New York</li></ul>
+<h2>Applying</h2><p>Application Deadline</p>${expl('Deadline for application submissions.')}<p>Rolling Admissions</p><p>Application Fee</p><p>$50</p>
+<p>Interview Required</p>${expl('Interview requirements for admission to the school.')}<p>Yes</p>
+<h3>Required/Recommended Tests</h3>${expl('Tests that are either required or recommended for admission to the school.')}<p>None</p>
+<h2>Tuition</h2><h3>Yearly Tuition</h3><p>$39,500</p><p>Tuition is for the highest grade offered and may have changed for the current school year.</p><p>Received Financial Aid</p><p>40%</p><p>Average Financial Aid</p><p>$18,262</p>
+<h2>From Aeon School</h2><p>AEON School is an online independent school that is rethinking education for a connected world, with live classes and a project-based curriculum.</p>
+<h2>Academics</h2><h3>Average Graduation Rate</h3><p>100%</p>
+<h3>Average SAT</h3><p>Average SAT composite score out of 1600, as reported by Niche users from this school.</p><p>1390</p><p>12 responses</p>
+<h3>Average ACT</h3><p>Average ACT composite score out of 36, as reported by Niche users from this school.</p><p>31</p><p>6 responses</p>
+<h3>Academics at AEON</h3><p>The foundation of an AEON School education is Great Works, our core curriculum integrating English, social studies and science.</p>
+<h2>Students</h2><p>Diversity</p><p>grade A+</p><p>Based on racial and economic diversity and survey responses on school culture from students and parents.</p><h3>Students</h3><p>176</p>
+<h2>Teachers</h2><h3>Student-Teacher Ratio</h3><p>Student-Teacher Ratio may not be indicative of class size. It is calculated using the reported number of students and full-time equivalent teachers.</p><p>10:1</p><p>National 16:1</p>
+</nav></body></html>`;
+    const rec = (url) => ({ url, finalUrl: url, ok: true, kind: 'html', ...parseHtml(niche, url), _html: niche });
+    const aeon = { id: 'aeon', name: 'AEON School (formerly Avenues Silicon Valley)', division: null, website: 'https://aeonschool.org/' };
+    const f = readSavedPage(rec('https://www.niche.com/k12/aeon-school-new-york-ny/'), 'niche', aeon, NOW).fields;
+    const v = (k) => f[k] && f[k].value;
+    assert.strictEqual(v('location'), '447 Broadway, New York, NY 10013', 'the school’s address, never Niche’s own office in the page’s structured data');
+    assert.strictEqual(v('grades'), '5–12');
+    assert.strictEqual(v('schoolType'), 'Private | Online');
+    assert.strictEqual(v('partners'), 'NAIS');
+    assert.strictEqual(v('enrollment'), '176', '“Students” after a heading is the headcount, not the menu entry or the diversity section');
+    assert.strictEqual(v('ratio'), '10:1', 'the explanation line is skipped and “National 16:1” is not the answer');
+    assert.strictEqual(v('tuition'), '$39,500');
+    assert.match(f.tuition.note, /highest grade offered/); assert.match(f.tuition.note, /40% of students receive it, average \$18,262/);
+    assert.strictEqual(v('testScores'), 'Average SAT score: 1390\nAverage ACT score: 31');
+    assert.match(f.testScores.note, /reported by Niche users[^.]*SAT from 12 responses, ACT from 6 responses/);
+    assert.strictEqual(v('timeline'), 'Application deadline: Rolling Admissions', 'the line explaining the deadline is not the deadline');
+    assert.strictEqual(v('interviews'), 'Interview Required: Yes');
+    assert.strictEqual(v('testingPolicy'), 'Required/Recommended Tests: None');
+    assert.strictEqual(v('application'), 'Application Fee: $50');
+    assert.match(v('about'), /^AEON School is an online independent school/); assert.match(f.about.note, /school’s own description, as shown on Niche/);
+    assert.match(v('academics'), /^The foundation of an AEON School education/);
+    assert.strictEqual(f.classSize, undefined, 'nothing is invented for what the page does not say');
+    // a page about the whole school is not about one division of it
+    const upper = { ...aeon, division: 'upper' };
+    const g = readSavedPage(rec('https://www.niche.com/k12/aeon-school-new-york-ny/'), 'niche', upper, NOW).fields;
+    assert.match(g.enrollment.note, /covers grades 5–12, wider than the upper school alone/);
+    assert.strictEqual(f.enrollment.note, undefined, 'a whole-school record needs no such warning');
+  });
+
   await check('a saved page is refused when it is a security-check page, empty, a web archive, from another site, or about another school', async () => {
     const denied = Buffer.from('<!DOCTYPE html><html><head><title>Access to this page has been denied</title></head><body><p>Press and hold to confirm you are a human</p></body></html>');
     await assert.rejects(sources.addFile({ school, source: 'niche', name: 'niche.html', bytes: denied }), /security check or “access denied”/);

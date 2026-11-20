@@ -12,7 +12,7 @@
 const cheerio = require('cheerio');
 const { oneLine, clip } = require('./util');
 const { parseHtml } = require('./html');
-const { extractSchool, TYPE_WORDS } = require('./rules');
+const { extractSchool, TYPE_WORDS, divisionFit } = require('./rules');
 
 const clean = (s) => oneLine(String(s == null ? '' : s).replace(/[ ​]/g, ' '));
 const numIn = (s) => { const m = /(\d[\d,]*(?:\.\d+)?)/.exec(String(s)); return m ? Number(m[1].replace(/,/g, '')) : null; };
@@ -61,6 +61,15 @@ const DEMO_LABELS = /^% students of color$|^students of color$|^minority( studen
 const SPORTS_LABEL = /^(sports( offered)?|athletics|varsity sports)$/i;
 const DEADLINE_LABELS = /^(application|admission|admissions|apply by|enrollment) deadline$|^deadline( to apply)?$/i;
 const AID_DEADLINE = /^(financial aid|fa) deadline$/i;
+// the share of students on aid and its average: kept as a note on the tuition answer, not as a question of its own
+const AID_LABELS = /^(received|students receiving|% on) financial aid$|^average financial aid$/i;
+// Niche words the application questions its own way ("Interview Required: Yes", "Required/Recommended Tests: None", "Application Fee: $50"):
+// [template row, label, what a usable value looks like]. The answer keeps Niche's own words.
+const GUIDE = [
+  ['interviews', /^interviews?( required)?$|^interview requirements?$/i, (v) => v.length <= 60 && /^(yes|no|required|recommended|optional|not required|by invitation|sometimes|none)\b/i.test(v)],
+  ['testingPolicy', /^required\/recommended tests?$|^(required|recommended) tests?$|^admissions? tests?( required)?$/i, (v) => v.length <= 80 && !/[.!?]$/.test(v)],
+  ['application', /^application fee$/i, (v) => v.length <= 40 && /\$\s?\d|free|waived|none/i.test(v)],
+];
 
 // ---------------------------------------------------------------------------------------------- finding the pairs ---
 /** The text of a value cell: notes such as "National avg.: 11:1" are dropped, a list of items becomes "a, b, c". */
@@ -114,20 +123,81 @@ function structuredPairs($, review) {
   return out;
 }
 
-/** "Label: value" lines, and a label line followed by a short value line, taken from the page text in reading order. */
+const isKnownLabel = (t) => LABELS.some(([, re]) => re.test(t)) || TYPE_LABELS.some((re) => re.test(t)) || TEST_LABELS.test(t) || DEMO_LABELS.test(t) || SPORTS_LABEL.test(t)
+  || DEADLINE_LABELS.test(t) || AID_DEADLINE.test(t) || AID_LABELS.test(t) || GUIDE.some(([, re]) => re.test(t));
+// a line that explains a figure ("Average SAT composite score out of 1600, as reported by ... Please contact the school.") rather than being one
+const looksLikeExplanation = (t) => t.length > 120 || (t.length > 25 && /[.!?]$/.test(t));
+
+/**
+ * "Label: value" lines, and a known label followed by its value, taken from the page text in reading order.
+ * Many sites put a one-sentence explanation between a label and its value ("Student-Teacher Ratio", then a sentence about how it is
+ * worked out, then "10:1"), so up to three following lines are offered as the value, stopping at the next label; the first one that
+ * reads as that fact's kind of value wins. The page's own navigation and footer are skipped, but a page whose code marks its whole
+ * content area as "navigation" (Niche) is still read.
+ */
 function lineText(blocks) {
   const out = [];
-  const known = (t) => LABELS.some(([, re]) => re.test(t)) || TYPE_LABELS.some((re) => re.test(t)) || TEST_LABELS.test(t) || DEMO_LABELS.test(t) || SPORTS_LABEL.test(t) || DEADLINE_LABELS.test(t);
-  for (let i = 0; i < blocks.length; i++) {
-    const b = blocks[i];
-    if (b.z === 'nav' || b.z === 'footer') continue;
-    const t = clean(b.text);
+  const body = blocks.filter((b) => b.z !== 'footer' && b.z !== 'header');
+  for (let i = 0; i < body.length; i++) {
+    const t = clean(body[i].text);
     if (t.length > 160) continue;
     const m = /^([A-Za-z%#.&/'’() -]{3,60}?):\s*(\S.{0,140})$/.exec(t);
     if (m) { out.push({ label: m[1].trim(), value: m[2].trim(), how: 'line', text: t }); continue; }
-    const nxt = blocks[i + 1];
-    if (nxt && t.length <= 60 && known(t.replace(/:$/, '')) && clean(nxt.text).length <= 120) out.push({ label: t.replace(/:$/, ''), value: clean(nxt.text), how: 'label then value', text: `${t.replace(/:$/, '')}: ${clean(nxt.text)}` });
+    const label = t.replace(/:$/, '');
+    if (t.length > 60 || !isKnownLabel(label)) continue;
+    for (let j = 1; j <= 3 && body[i + j]; j++) {
+      const v = clean(body[i + j].text);
+      if (isKnownLabel(v.replace(/:$/, ''))) break;           // the next label starts: this one had no value
+      if (!v || looksLikeExplanation(v)) continue;
+      out.push({ label, value: v, how: 'label then value', text: `${label}: ${v}` });
+    }
   }
+  return out;
+}
+
+const STREET_END = /\b(street|st|avenue|ave|broadway|boulevard|blvd|road|rd|drive|dr|lane|ln|way|place|pl|court|ct|plaza|square|parkway|pkwy|highway|hwy|circle|terrace|row|alley|walk)\b\.?/i;
+const titleCase = (s) => String(s).toLowerCase().replace(/(^|[\s-])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(\d+)(St|Nd|Rd|Th)\b/g, (m, n, s) => n + s.toLowerCase());
+
+/**
+ * What a page shows in its own layout rather than as a label and value: the grades and city under the school's name, the tags
+ * ("Private", "Online School", "NAIS Member"), the address block, and the text the school wrote about itself.
+ */
+function pageSections(blocks) {
+  const body = blocks.filter((b) => b.z !== 'footer' && b.z !== 'header');
+  const text = (b) => clean(b.text);
+  const out = { pairs: [], about: null, academics: null, partners: [], address: null };
+  const top = body.slice(0, 60);
+  const gradesBlock = top.find((b) => text(b).length <= 8 && READ.grades(text(b)));
+  if (gradesBlock) out.pairs.push({ label: 'Grades', value: text(gradesBlock), how: 'page header', text: `Grades: ${text(gradesBlock)}` });
+  const cs = top.map((b) => /^([A-Z][A-Za-z .'-]{1,40}),\s*([A-Z]{2})$/.exec(text(b))).find(Boolean);
+  // the tags under the "About" heading: Private, Online School, NAIS Member, ...
+  const ai = body.findIndex((b) => b.k === 'h' && /^About\b/i.test(text(b)));
+  if (ai >= 0) {
+    const tags = [];
+    for (let j = ai + 1; j < body.length && j < ai + 14; j++) {
+      if (body[j].k === 'h') { if (tags.length) break; else continue; }
+      if (body[j].k === 'li' && text(body[j]).length <= 40) tags.push(text(body[j]));
+    }
+    if (tags.length) out.pairs.push({ label: 'School type', value: tags.join(' '), how: 'tags', text: `School type: ${tags.join(', ')}` });
+    for (const t of tags) { const mm = /^([A-Z]{3,8}) Member$/.exec(t); if (mm) out.partners.push(mm[1]); }
+  }
+  // the address block: "447 BROADWAY NEW YORK, NY 10013" (the city is known from the header, else the last street word ends the street)
+  const ab = body.find((b) => /^\d{1,6}\s+[^,]{3,80},\s*[A-Z]{2}\s+\d{5}(-\d{4})?$/.test(text(b)));
+  if (ab) {
+    const m = /^(\d{1,6}\s+[^,]{3,80}),\s*([A-Z]{2})\s+(\d{5})/.exec(text(ab));
+    let street = m[1], city = '';
+    if (cs && street.toLowerCase().endsWith(cs[1].toLowerCase()) && street.length > cs[1].length + 3) { city = cs[1]; street = street.slice(0, street.length - cs[1].length); }
+    else { const all = [...street.matchAll(new RegExp(STREET_END.source, 'gi'))]; const last = all[all.length - 1]; if (last && last.index + last[0].length < street.length) { city = street.slice(last.index + last[0].length); street = street.slice(0, last.index + last[0].length); } }
+    street = street.replace(/[\s,]+$/, '');
+    city = clean(city);
+    if (street && city) out.address = { value: `${titleCase(street)}, ${titleCase(city)}, ${m[2]} ${m[3]}`, text: `Address on the page: ${text(ab)}` };
+  }
+  // text the school wrote about itself: "From Aeon School", "Academics at AEON"
+  const paragraphAfter = (i) => { for (let j = i + 1; j < body.length && j <= i + 3; j++) { if (body[j].k === 'h') return null; const t = text(body[j]); if (body[j].k === 'p' && t.length >= 60) return t; } return null; };
+  const fi = body.findIndex((b) => b.k === 'h' && /^From (?!the school$)[A-Z]/.test(text(b)));
+  if (fi >= 0) { const t = paragraphAfter(fi); if (t) out.about = { value: clip(t, 900), text: `${text(body[fi])}: ${t}` }; }
+  const ci = body.findIndex((b) => b.k === 'h' && /^Academics at\b/i.test(text(b)));
+  if (ci >= 0) { const t = paragraphAfter(ci); if (t) out.academics = { value: clip(t, 900), text: `${text(body[ci])}: ${t}` }; }
   return out;
 }
 
@@ -136,7 +206,8 @@ function address(rec) {
   for (const n of rec.jsonld || []) {
     const types = [].concat(n && n['@type'] || []).join(' ');
     const a = n && n.address;
-    if (/School|EducationalOrganization|Organization|CollegeOrUniversity/i.test(types) && a && typeof a === 'object' && a.streetAddress && a.addressLocality) {
+    // only the school's own record: a page's "Organization" entry is the site's publisher (Niche's own office in Pittsburgh), not the school
+    if (/\bSchool\b|EducationalOrganization/i.test(types) && a && typeof a === 'object' && a.streetAddress && a.addressLocality) {
       const tail = [a.addressRegion, a.postalCode].filter(Boolean).join(' ');
       return { value: [a.streetAddress, a.addressLocality, tail].filter(Boolean).join(', '), text: `Structured data on the page: ${a.streetAddress}, ${a.addressLocality}, ${tail}`.replace(/,\s*$/, '') };
     }
@@ -148,17 +219,20 @@ function address(rec) {
  * rec: the saved page after parseHtml, plus _html. Returns { fields, pairs } where fields only holds answers that were found:
  * { status: 'found', value, confidence, sources: [{ url, title }], snippet, how }.
  */
-function readFacts(rec, source) {
+function readFacts(rec, source, school) {
   const $ = cheerio.load(rec._html || '');
   const review = source === 'psr' || source === 'bsr';
+  const tableLayout = review && $('.dt-row').length > 0;
+  const sec = tableLayout ? { pairs: [], about: null, academics: null, partners: [], address: null } : pageSections(rec.blocks || []);
   const seenPair = new Set();
-  const pairs = [...structuredPairs($, review), ...(review && $('.dt-row').length ? [] : lineText(rec.blocks || []))]
+  const pairs = [...structuredPairs($, review), ...(tableLayout ? [] : lineText(rec.blocks || [])), ...sec.pairs]
     .filter((p) => { const k = `${p.label}|${p.value}`.toLowerCase(); if (seenPair.has(k)) return false; seenPair.add(k); return true; });
   const url = rec.finalUrl || rec.url, title = rec.title || '';
+  const siteName = source === 'niche' ? 'Niche' : source === 'psr' ? 'Private School Review' : source === 'bsr' ? 'Boarding School Review' : 'this page';
   const fields = {};
-  const set = (key, value, text, how) => {
+  const set = (key, value, text, how, note) => {
     if (value == null || value === '' || fields[key]) return;
-    fields[key] = { status: 'found', value: String(value), confidence: 'medium', sources: [{ url, title }], snippet: clip(text, 460), how };
+    fields[key] = { status: 'found', value: String(value), confidence: 'medium', sources: [{ url, title }], snippet: clip(text, 460), how, ...(note ? { note } : {}) };
   };
 
   for (const p of pairs) {
@@ -169,6 +243,15 @@ function readFacts(rec, source) {
     }
   }
   const mine = (re) => pairs.filter((p) => re.test(p.label));
+  // the application questions the site answers in a word or two, in the site's own words
+  for (const [key, re, ok] of GUIDE) {
+    const p = pairs.find((x) => re.test(x.label) && ok(x.value));
+    if (p) set(key, `${p.label}: ${p.value}`, p.text, p.how);
+  }
+  // text the school wrote about itself on the page, and the memberships it lists
+  if (sec.about) set('about', sec.about.value, sec.about.text, 'school’s own text', `This is the school’s own description, as shown on ${siteName}.`);
+  if (sec.academics) set('academics', sec.academics.value, sec.academics.text, 'school’s own text', `This is the school’s own text about its academics, as shown on ${siteName}.`);
+  if (sec.partners.length) set('partners', sec.partners.join(' | '), `Listed as a member: ${sec.partners.join(', ')}`, 'tags');
 
   // school type: religious affiliation, student body (all-girls, co-ed), day or boarding
   const typeText = pairs.filter((p) => TYPE_LABELS.some((re) => re.test(p.label)) && !/^(none|n\/a|not applicable)$/i.test(p.value));
@@ -183,9 +266,15 @@ function readFacts(rec, source) {
     const name = (/\b(sat|act|ssat|isee|hspt)\b/i.exec(p.label) || [])[1];
     if (n == null || !name || seenTest.has(name.toUpperCase())) continue;
     seenTest.add(name.toUpperCase());
-    tests.push({ line: `Average ${name.toUpperCase()} score: ${p.value.replace(/\s*\(.*$/, '')}`, text: p.text });
+    tests.push({ name: name.toUpperCase(), label: p.label, line: `Average ${name.toUpperCase()} score: ${p.value.replace(/\s*\(.*$/, '')}`, text: p.text });
   }
-  if (tests.length) set('testScores', tests.map((t) => t.line).join('\n'), tests.map((t) => t.text).join(' · '), 'facts');
+  if (tests.length) {
+    // some sites (Niche) average what visitors typed in: say so, and how many did
+    const counts = tests.map((t) => { const q = pairs.find((p) => p.label === t.label && /^\d+\s+responses?$/i.test(p.value)); return q ? `${t.name} from ${q.value}` : null; }).filter(Boolean);
+    const userReported = source === 'niche';
+    set('testScores', tests.map((t) => t.line).join('\n'), tests.map((t) => t.text).join(' · '), 'facts',
+      userReported ? `Niche says these averages are reported by Niche users from this school, not by the school${counts.length ? ` (${counts.join(', ')})` : ''}.` : null);
+  }
   // sports: a list of names (a bare count such as "11 sports" is not a list)
   for (const p of mine(SPORTS_LABEL)) {
     if (/^\d+\s*(sports)?$/i.test(p.value) || p.value.length < 4) continue;
@@ -199,8 +288,29 @@ function readFacts(rec, source) {
   const aid = mine(AID_DEADLINE).filter((p) => /\w/.test(p.value) && p.value.length <= 60)[0];
   if (dl) set('timeline', [`Application deadline: ${dl.value}`, aid ? `Financial aid deadline: ${aid.value}` : null].filter(Boolean).join('\n'), [dl.text, aid && aid.text].filter(Boolean).join(' · '), dl.how);
   // where the school is
-  const addr = address(rec);
-  if (addr) set('location', addr.value, addr.text, 'structured data');
+  const addr = address(rec) || (sec.address ? { ...sec.address, how: 'address block' } : null);
+  if (addr) set('location', addr.value, addr.text, addr.how || 'structured data');
+
+  // notes that go with the figures
+  const aidShare = (pairs.find((p) => /^(received|students receiving|% on) financial aid$/i.test(p.label)) || {}).value;
+  const aidAvg = (pairs.find((p) => /^average financial aid$/i.test(p.label)) || {}).value;
+  if (fields.tuition) {
+    const bits = [];
+    if (source === 'niche') bits.push('Niche says this tuition is for the highest grade offered and may have changed for the current year.');
+    if (aidShare || aidAvg) bits.push(`Financial aid: ${[aidShare && `${aidShare} of students receive it`, aidAvg && `average ${aidAvg}`].filter(Boolean).join(', ')}.`);
+    if (bits.length) fields.tuition.note = bits.join(' ');
+  }
+  if (source === 'niche' && fields.ratio) fields.ratio.note = 'Niche works this out from the reported number of students and full-time teachers; it may not match class size.';
+  // a page about the whole school (grades 5-12) is not about one division of it (the Upper School, grades 9-12)
+  if (school && school.division && fields.grades) {
+    const fit = divisionFit(`Grades ${fields.grades.value.replace('–', '-')}`, school.division);
+    if (fit !== 1) {
+      const msg = `This page covers grades ${fields.grades.value}, wider than the ${school.division} school alone, so check that the figure applies to it.`;
+      for (const k of ['enrollment', 'classSize', 'ratio', 'facultyDegrees', 'testScores', 'demographics', 'tuition', 'counselors', 'advancedClasses']) {
+        if (fields[k]) fields[k].note = [fields[k].note, msg].filter(Boolean).join(' ');
+      }
+    }
+  }
   return { fields, pairs: pairs.length };
 }
 
@@ -220,7 +330,7 @@ function readApplicationText(rec, school, now) {
  * One saved page → answers. `source` is 'ravenna' | 'niche' | 'psr' | 'bsr'. A labelled fact always beats a rule's guess for the same field.
  */
 function readSavedPage(rec, source, school, now = new Date()) {
-  const facts = readFacts(rec, source);
+  const facts = readFacts(rec, source, school);
   const fields = { ...facts.fields };
   if (source === 'ravenna') {
     let rules = {};
